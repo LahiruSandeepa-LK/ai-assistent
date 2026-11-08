@@ -1,0 +1,12 @@
+# Dev override: hardcoded auth, hot reload (see docs/10-deployment.md)
+services:
+  gateway:
+    environment:
+      - AUTH_MODE=dev
+    volumes: ["./services/gateway:/app", "./libs:/libs"]
+  agent:
+    volumes: ["./services/agent:/app", "./libs:/libs"]
+  ui-public:
+    volumes: ["./services/ui-public:/app"]
+  ui-admin:
+    volumes: ["./services/ui-admin:/app"]

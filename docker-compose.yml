@@ -1,0 +1,57 @@
+# ABC Bank AI Assistant - full stack (see docs/10-deployment.md)
+name: ai-assistant
+services:
+  ui-public:
+    build: ./services/ui-public
+    ports: ["8501:8501"]
+    env_file: .env
+    depends_on: [gateway]
+  ui-admin:
+    build: ./services/ui-admin
+    ports: ["8502:8502"]
+    env_file: .env
+    depends_on: [gateway]
+  gateway:
+    build: ./services/gateway
+    ports: ["8000:8000"]
+    env_file: .env
+    depends_on: [agent, ingest, redis, keycloak]
+  agent:
+    build: ./services/agent
+    env_file: .env
+    expose: ["8100"]
+    depends_on: [retrieval, redis, postgres, mcp]
+  retrieval:
+    build: ./services/retrieval
+    env_file: .env
+    expose: ["8200"]
+  ingest:
+    build: ./services/ingestion
+    env_file: .env
+    expose: ["8400"]
+    depends_on: [postgres]
+  mcp:
+    build: ./services/mcp
+    env_file: .env
+    expose: ["8300"]
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0
+    command: start-dev --import-realm
+    ports: ["8080:8080"]
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    depends_on: [postgres]
+  redis:
+    image: redis:7
+    expose: ["6379"]
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: app
+    expose: ["5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+volumes:
+  pgdata:

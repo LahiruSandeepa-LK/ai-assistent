@@ -1,0 +1,60 @@
+<mxfile host="app.diagrams.net" modified="2026-11-08T00:00:00.000Z" agent="ai-assistant-design" version="24.0.0">
+  <diagram id="c4-component-agent" name="C4 L3 - Agent Service Components">
+    <mxGraphModel dx="1200" dy="820" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" value="C4 Level 3 — Component Diagram: agent service (LangGraph)" style="text;html=1;fontSize=16;fontStyle=1;align=left;" vertex="1" parent="1"><mxGeometry x="40" y="20" width="800" height="30" as="geometry"/></mxCell>
+
+        <mxCell id="gw" value="from gateway&#10;(signed user ctx + message)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#08427B;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="40" y="90" width="200" height="50" as="geometry"/></mxCell>
+
+        <mxCell id="builder" value="Graph Builder&#10;StateGraph + Redis checkpointer" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1061B0;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="300" y="85" width="220" height="60" as="geometry"/></mxCell>
+
+        <!-- nodes boundary -->
+        <mxCell id="nodes_b" value="Graph nodes" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=none;strokeColor=#0D5091;verticalAlign=top;fontColor=#0D5091;fontStyle=2;" vertex="1" parent="1"><mxGeometry x="40" y="180" width="560" height="460" as="geometry"/></mxCell>
+        <mxCell id="supervisor" value="Supervisor&#10;intent · decompose · route" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2E86C1;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="200" y="210" width="220" height="50" as="geometry"/></mxCell>
+        <mxCell id="retr_a" value="Retrieval agent&#10;single-shot hybrid search" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2E86C1;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="70" y="300" width="220" height="50" as="geometry"/></mxCell>
+        <mxCell id="res_a" value="Research agent (RLM)&#10;plan-as-code · Send fan-out · aggregate" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2E86C1;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="330" y="300" width="240" height="50" as="geometry"/></mxCell>
+        <mxCell id="valid" value="Validation&#10;groundedness · citation integrity · guardrail verdict" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2E86C1;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="190" y="400" width="240" height="60" as="geometry"/></mxCell>
+        <mxCell id="hitl" value="HITL Approval&#10;interrupt() for high-risk ops" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#B9770E;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="70" y="500" width="220" height="50" as="geometry"/></mxCell>
+        <mxCell id="resp" value="Response&#10;synthesize + stream + cite" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2E86C1;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="330" y="500" width="240" height="50" as="geometry"/></mxCell>
+
+        <!-- supporting components -->
+        <mxCell id="pep" value="Policy Enforcement Point&#10;(libs/authz) role×action×resource" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#922B21;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="660" y="200" width="250" height="60" as="geometry"/></mxCell>
+        <mxCell id="tools" value="Tool registry&#10;knowledge_search · mcp.* · python_analysis (sandbox)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#117A65;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="660" y="290" width="250" height="70" as="geometry"/></mxCell>
+        <mxCell id="guard" value="Guardrails&#10;input (injection) · content sanitize · output (brand/citation)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#922B21;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="660" y="390" width="250" height="70" as="geometry"/></mxCell>
+        <mxCell id="mem" value="Memory managers&#10;short-term (checkpointer) · long-term (vector/PG)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#6C3483;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="660" y="490" width="250" height="70" as="geometry"/></mxCell>
+        <mxCell id="trace" value="Trace emitter&#10;LangSmith spans + AgentEvent stream" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#5D6D7E;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="660" y="590" width="250" height="60" as="geometry"/></mxCell>
+
+        <!-- external deps -->
+        <mxCell id="retrieval_svc" value="retrieval service" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#999999;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="990" y="290" width="160" height="40" as="geometry"/></mxCell>
+        <mxCell id="mcp_svc" value="mcp service" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#999999;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="990" y="340" width="160" height="40" as="geometry"/></mxCell>
+        <mxCell id="llm_svc" value="LLM provider" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#999999;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="990" y="200" width="160" height="40" as="geometry"/></mxCell>
+        <mxCell id="store_svc" value="Redis + Postgres + vector mem" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#999999;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="990" y="490" width="160" height="50" as="geometry"/></mxCell>
+        <mxCell id="ls_svc" value="LangSmith" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#999999;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="990" y="600" width="160" height="40" as="geometry"/></mxCell>
+
+        <!-- edges -->
+        <mxCell id="a1" style="endArrow=block;html=1;" edge="1" parent="1" source="gw" target="builder"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a2" style="endArrow=block;html=1;" edge="1" parent="1" source="builder" target="supervisor"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a3" value="route" style="endArrow=block;html=1;fontSize=9;" edge="1" parent="1" source="supervisor" target="retr_a"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a4" value="route" style="endArrow=block;html=1;fontSize=9;" edge="1" parent="1" source="supervisor" target="res_a"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a5" style="endArrow=block;html=1;" edge="1" parent="1" source="retr_a" target="valid"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a6" style="endArrow=block;html=1;" edge="1" parent="1" source="res_a" target="valid"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a7" value="retry" style="endArrow=block;html=1;dashed=1;fontSize=9;" edge="1" parent="1" source="valid" target="supervisor"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a8" value="high-risk" style="endArrow=block;html=1;fontSize=9;" edge="1" parent="1" source="valid" target="hitl"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a9" value="ok" style="endArrow=block;html=1;fontSize=9;" edge="1" parent="1" source="valid" target="resp"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a10" value="approved" style="endArrow=block;html=1;fontSize=9;" edge="1" parent="1" source="hitl" target="resp"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="b1" value="before every tool" style="endArrow=block;html=1;dashed=1;fontSize=9;" edge="1" parent="1" source="tools" target="pep"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="b2" style="endArrow=block;html=1;" edge="1" parent="1" source="res_a" target="tools"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="b3" style="endArrow=block;html=1;" edge="1" parent="1" source="retr_a" target="tools"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="b4" style="endArrow=block;html=1;" edge="1" parent="1" source="tools" target="retrieval_svc"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="b5" style="endArrow=block;html=1;" edge="1" parent="1" source="tools" target="mcp_svc"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="b6" style="endArrow=block;html=1;" edge="1" parent="1" source="supervisor" target="llm_svc"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="b7" style="endArrow=block;html=1;" edge="1" parent="1" source="mem" target="store_svc"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="b8" style="endArrow=block;html=1;" edge="1" parent="1" source="trace" target="ls_svc"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="b9" value="sanitize evidence" style="endArrow=block;html=1;dashed=1;fontSize=9;" edge="1" parent="1" source="guard" target="valid"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

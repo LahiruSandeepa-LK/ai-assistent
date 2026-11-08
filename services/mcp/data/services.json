@@ -1,0 +1,12 @@
+[
+  {
+    "service": "payment-gateway",
+    "owner": "payments",
+    "tier": 1
+  },
+  {
+    "service": "auth",
+    "owner": "platform",
+    "tier": 1
+  }
+]

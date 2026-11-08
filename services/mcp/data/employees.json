@@ -1,0 +1,14 @@
+[
+  {
+    "id": "E001",
+    "name": "A. Perera",
+    "dept": "payments",
+    "role": "SRE"
+  },
+  {
+    "id": "E002",
+    "name": "R. Silva",
+    "dept": "platform",
+    "role": "Architect"
+  }
+]

@@ -1,0 +1,7 @@
+[
+  {
+    "id": "INC-2026-0421",
+    "service": "payment-gateway",
+    "root_cause": "db pool exhaustion"
+  }
+]
