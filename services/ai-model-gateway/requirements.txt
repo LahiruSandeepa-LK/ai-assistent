@@ -1,0 +1,7 @@
+fastapi
+uvicorn[standard]
+pydantic
+# real LLM providers (install the one you use)
+google-genai
+anthropic
+openai

@@ -1,8 +1,0 @@
-fastapi
-uvicorn[standard]
-pinecone-client
-httpx
-pydantic
-sqlalchemy
-asyncpg
-structlog

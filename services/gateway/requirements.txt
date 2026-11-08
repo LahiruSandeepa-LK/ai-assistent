@@ -1,9 +1,0 @@
-fastapi
-uvicorn[standard]
-httpx
-sse-starlette
-redis
-python-jose[cryptography]
-pydantic
-pydantic-settings
-structlog

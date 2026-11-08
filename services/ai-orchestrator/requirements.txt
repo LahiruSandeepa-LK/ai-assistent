@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+pydantic
+httpx
+langgraph
+langsmith
+google-genai
+anthropic
+openai
+mcp

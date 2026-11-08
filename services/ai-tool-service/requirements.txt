@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+pydantic
+mcp
+httpx
+# optional: pypdf (PDF), python-docx (DOCX), tavily for live web search

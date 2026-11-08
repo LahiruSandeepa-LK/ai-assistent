@@ -1,56 +1,75 @@
-# ABC Bank AI Assistant - full stack (see docs/10-deployment.md)
+# ABC Bank AI Assistant - all services share ./libs (root build context). docs/10, docs/13
+# Quick start:  cp .env.example .env  &&  docker compose up --build
 name: ai-assistant
 services:
   ui-public:
-    build: ./services/ui-public
+    build: { context: ., dockerfile: services/ui-public/Dockerfile }
     ports: ["8501:8501"]
     env_file: .env
-    depends_on: [gateway]
+    environment:
+      - API_URL=http://ai-assistant-api:8000
+    depends_on: [ai-assistant-api]
   ui-admin:
-    build: ./services/ui-admin
+    build: { context: ., dockerfile: services/ui-admin/Dockerfile }
     ports: ["8502:8502"]
     env_file: .env
-    depends_on: [gateway]
-  gateway:
-    build: ./services/gateway
+    environment:
+      - ADMIN_URL=http://ai-admin-service:8800
+    depends_on: [ai-admin-service]
+  ai-assistant-api:
+    build: { context: ., dockerfile: services/ai-assistant-api/Dockerfile }
     ports: ["8000:8000"]
     env_file: .env
-    depends_on: [agent, ingest, redis, keycloak]
-  agent:
-    build: ./services/agent
-    env_file: .env
+    environment:
+      - AUTH_MODE=dev
+      - INGEST_ON_START=true
+      - SAMPLE_DOCS=/corpus
+    volumes: ["./services/ai-knowledge-service/ingestion/sample_docs:/corpus:ro"]
+    depends_on: [ai-orchestrator, ai-conversation-service, redis]
+  ai-orchestrator:
+    build: { context: ., dockerfile: services/ai-orchestrator/Dockerfile }
     expose: ["8100"]
-    depends_on: [retrieval, redis, postgres, mcp]
-  retrieval:
-    build: ./services/retrieval
     env_file: .env
+    depends_on: [ai-knowledge-retrieval, ai-tool-service, ai-conversation-service, ai-model-gateway]
+  ai-knowledge-retrieval:
+    build: { context: ., dockerfile: services/ai-knowledge-service/retrieval/Dockerfile }
     expose: ["8200"]
-  ingest:
-    build: ./services/ingestion
     env_file: .env
+  ai-knowledge-ingest:
+    build: { context: ., dockerfile: services/ai-knowledge-service/ingestion/Dockerfile }
     expose: ["8400"]
-    depends_on: [postgres]
-  mcp:
-    build: ./services/mcp
     env_file: .env
+    depends_on: [postgres]
+  ai-tool-service:
+    build: { context: ., dockerfile: services/ai-tool-service/Dockerfile }
     expose: ["8300"]
+    env_file: .env
+  ai-conversation-service:
+    build: { context: ., dockerfile: services/ai-conversation-service/Dockerfile }
+    expose: ["8600"]
+    env_file: .env
+    depends_on: [redis, postgres]
+  ai-model-gateway:
+    build: { context: ., dockerfile: services/ai-model-gateway/Dockerfile }
+    expose: ["8700"]
+    env_file: .env
+    depends_on: [redis]
+  ai-admin-service:
+    build: { context: ., dockerfile: services/ai-admin-service/Dockerfile }
+    expose: ["8800"]
+    env_file: .env
+    depends_on: [ai-knowledge-ingest, postgres]
   keycloak:
     image: quay.io/keycloak/keycloak:25.0
-    command: start-dev --import-realm
+    command: start-dev
     ports: ["8080:8080"]
-    environment:
-      KEYCLOAK_ADMIN: admin
-      KEYCLOAK_ADMIN_PASSWORD: admin
-    depends_on: [postgres]
+    environment: { KEYCLOAK_ADMIN: admin, KEYCLOAK_ADMIN_PASSWORD: admin }
   redis:
     image: redis:7
     expose: ["6379"]
   postgres:
     image: postgres:16
-    environment:
-      POSTGRES_USER: app
-      POSTGRES_PASSWORD: app
-      POSTGRES_DB: app
+    environment: { POSTGRES_USER: app, POSTGRES_PASSWORD: app, POSTGRES_DB: app }
     expose: ["5432"]
     volumes: ["pgdata:/var/lib/postgresql/data"]
 volumes:

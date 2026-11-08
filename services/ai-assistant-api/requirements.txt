@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+pydantic
+httpx
+python-jose[cryptography]
+langgraph
+langsmith
+google-genai
+anthropic
+openai
+mcp

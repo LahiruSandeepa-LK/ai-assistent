@@ -1,0 +1,5 @@
+pytest
+fastapi
+httpx<0.28
+langgraph
+langsmith

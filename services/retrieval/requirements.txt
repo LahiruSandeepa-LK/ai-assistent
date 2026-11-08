@@ -1,8 +1,0 @@
-fastapi
-uvicorn[standard]
-pinecone-client
-httpx
-rank-bm25
-sentence-transformers
-pydantic
-structlog

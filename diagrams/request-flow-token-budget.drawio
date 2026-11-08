@@ -1,0 +1,57 @@
+<mxfile host="app.diagrams.net" modified="2026-11-09T00:00:00.000Z" agent="ai-assistant-design" version="24.0.0">
+  <diagram id="req-flow" name="Request Flow + Token Budget">
+    <mxGraphModel dx="1200" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1000" pageHeight="1200" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" value="Request Flow — token-budget gate + cache/context skip (docs/14)" style="text;html=1;fontSize=15;fontStyle=1;align=left;" vertex="1" parent="1"><mxGeometry x="40" y="20" width="900" height="30" as="geometry"/></mxCell>
+
+        <mxCell id="u" value="user message" style="ellipse;whiteSpace=wrap;html=1;fillColor=#2E7D32;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="400" y="70" width="140" height="45" as="geometry"/></mxCell>
+
+        <mxCell id="api" value="ai-assistant-api:  authN · RBAC · rate-limit (req/min)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#0D5091;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="300" y="140" width="340" height="40" as="geometry"/></mxCell>
+
+        <mxCell id="tok" value="TOKEN BUDGET check&#10;(Redis via ai-conversation-service)&#10;remaining &gt; 0 ?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#F1C40F;fontColor=#000000;" vertex="1" parent="1"><mxGeometry x="360" y="205" width="220" height="110" as="geometry"/></mxCell>
+        <mxCell id="limit" value="&quot;You've reached your token&#10;limit for this {period}.&#10;Resets {reset_at}.&quot;  ✋" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#922B21;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="660" y="220" width="260" height="80" as="geometry"/></mxCell>
+
+        <mxCell id="ig" value="input guardrail (prompt-injection screen)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#922B21;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="320" y="350" width="300" height="40" as="geometry"/></mxCell>
+
+        <mxCell id="ctx" value="ai-orchestrator ROUTER&#10;load context from ai-conversation-service&#10;(summary + last turns + profile)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1061B0;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="300" y="420" width="340" height="70" as="geometry"/></mxCell>
+
+        <mxCell id="cache" value="semantic cache hit?&#10;(near-duplicate query)" style="rhombus;whiteSpace=wrap;html=1;fillColor=#F1C40F;fontColor=#000000;" vertex="1" parent="1"><mxGeometry x="360" y="520" width="220" height="90" as="geometry"/></mxCell>
+        <mxCell id="ctxq" value="answerable from context?&#10;(in-session follow-up)" style="rhombus;whiteSpace=wrap;html=1;fillColor=#F1C40F;fontColor=#000000;" vertex="1" parent="1"><mxGeometry x="360" y="640" width="220" height="90" as="geometry"/></mxCell>
+
+        <mxCell id="skip" value="return cached / context answer&#10;(NO RAG, NO tools, ~0–1 LLM call)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#117A65;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="660" y="545" width="280" height="140" as="geometry"/></mxCell>
+
+        <mxCell id="route" value="classify intent → route" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1061B0;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="330" y="760" width="280" height="40" as="geometry"/></mxCell>
+        <mxCell id="rag" value="RAG&#10;ai-knowledge-service" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2E86C1;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="120" y="830" width="180" height="50" as="geometry"/></mxCell>
+        <mxCell id="toolp" value="tool&#10;ai-tool-service (authz)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2E86C1;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="330" y="830" width="180" height="50" as="geometry"/></mxCell>
+        <mxCell id="research" value="research (RLM)&#10;decompose→fan-out→aggregate" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2E86C1;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="540" y="830" width="230" height="50" as="geometry"/></mxCell>
+
+        <mxCell id="llm" value="LLM via ai-model-gateway&#10;→ POST: record tokens (Redis + ledger)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#B9770E;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="300" y="910" width="340" height="50" as="geometry"/></mxCell>
+        <mxCell id="val" value="validation + output guardrail&#10;(groundedness · citations · sensitive-data)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#922B21;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="300" y="985" width="340" height="50" as="geometry"/></mxCell>
+        <mxCell id="resp" value="stream response  +  append turn;  every 10 → async summarize" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2E7D32;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="280" y="1060" width="380" height="50" as="geometry"/></mxCell>
+
+        <!-- edges -->
+        <mxCell id="e1" style="endArrow=block;html=1;" edge="1" parent="1" source="u" target="api"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2" style="endArrow=block;html=1;" edge="1" parent="1" source="api" target="tok"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3" value="no" style="endArrow=block;html=1;fontSize=9;" edge="1" parent="1" source="tok" target="limit"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e4" value="yes" style="endArrow=block;html=1;fontSize=9;" edge="1" parent="1" source="tok" target="ig"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e5" style="endArrow=block;html=1;" edge="1" parent="1" source="ig" target="ctx"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e6" style="endArrow=block;html=1;" edge="1" parent="1" source="ctx" target="cache"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e7" value="hit" style="endArrow=block;html=1;fontSize=9;" edge="1" parent="1" source="cache" target="skip"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e8" value="miss" style="endArrow=block;html=1;fontSize=9;" edge="1" parent="1" source="cache" target="ctxq"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e9" value="yes" style="endArrow=block;html=1;fontSize=9;" edge="1" parent="1" source="ctxq" target="skip"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e10" value="no" style="endArrow=block;html=1;fontSize=9;" edge="1" parent="1" source="ctxq" target="route"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e11" style="endArrow=block;html=1;" edge="1" parent="1" source="route" target="rag"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e12" style="endArrow=block;html=1;" edge="1" parent="1" source="route" target="toolp"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e13" style="endArrow=block;html=1;" edge="1" parent="1" source="route" target="research"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e14" style="endArrow=block;html=1;" edge="1" parent="1" source="rag" target="llm"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e15" style="endArrow=block;html=1;" edge="1" parent="1" source="toolp" target="llm"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e16" style="endArrow=block;html=1;" edge="1" parent="1" source="research" target="llm"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e17" style="endArrow=block;html=1;" edge="1" parent="1" source="llm" target="val"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e18" style="endArrow=block;html=1;" edge="1" parent="1" source="val" target="resp"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e19" style="endArrow=block;html=1;dashed=1;" edge="1" parent="1" source="skip" target="resp"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

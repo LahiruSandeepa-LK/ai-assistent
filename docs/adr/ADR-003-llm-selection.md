@@ -46,3 +46,11 @@ later. Model routing is the main cost lever for agentic systems and is nearly fr
 1. [ ] `LLMProvider` interface + Anthropic/OpenAI adapters.
 2. [ ] Config-driven model routing (fast vs strong).
 3. [ ] Fallback-path integration test (kill primary).
+
+## Addendum (2026-11-09): provider adapters
+All LLM calls go through `ai-model-gateway` / `libs/llm`. Providers are pluggable via
+`LLM_PROVIDER` (gemini | anthropic | openai | mock) with per-provider `*_MODEL_STRONG/FAST`
+env vars and an optional `LLM_FALLBACK`. Adapters: `libs/llm/provider_gemini.py`,
+`provider_anthropic.py`, `provider_openai.py` — each implements one `complete()` method and
+reports real token usage to the budget. Adding a model = one new `provider_*.py` + a line in
+`get_provider()`. Model slugs are env-overridable because they change frequently.

@@ -7,13 +7,17 @@ This document is the narrative companion so the diagrams are readable without a 
 | Level | File | What it shows |
 |-------|------|---------------|
 | L1 Context | `diagrams/c4-l1-context.drawio` | The system as one box, its users and external systems |
-| L2 Container | `diagrams/c4-l2-container.drawio` | The 10 containers (two UIs) and how they talk |
-| L3 Component | `diagrams/c4-l3-component-agent.drawio` | Inside the Agent service: graph nodes, tools, guardrails, memory |
-| Supplementary | `diagrams/langgraph-agent-flow.drawio` | The LangGraph state machine (nodes + conditional edges) |
-| Supplementary | `diagrams/rag-hybrid-retrieval-sequence.drawio` | Hybrid retrieval + rerank sequence |
+| L2 Container | `diagrams/c4-l2-container.drawio` | The `ai-*` services (incl. conversation-service + model-gateway) and how they talk |
+| L3 Component | `diagrams/c4-l3-component-agent.drawio` | Inside **ai-orchestrator**: router + graph nodes, tools, guardrails, memory |
+| Supplementary | `diagrams/service-connection-map.drawio` | Service wiring with protocols (docs/13) |
+| Supplementary | `diagrams/langgraph-agent-flow.drawio` | The LangGraph state machine (router-first + conditional edges) |
+| Supplementary | `diagrams/request-flow-token-budget.drawio` | End-to-end flow: token gate + cache/context skip (docs/14) |
+| Supplementary | `diagrams/rag-hybrid-retrieval-sequence.drawio` | Hybrid retrieval + rerank sequence (read path) |
+| Supplementary | `diagrams/rag-ingestion-pipeline.drawio` | Ingestion write path: chunk → embed → upsert (docs/04, docs/13) |
 | Supplementary | `diagrams/deployment-docker-compose.drawio` | Deployment / Compose topology |
-| Supplementary | `diagrams/security-rbac-flow.drawio` | AuthN/AuthZ + RBAC + rate-limit flow |
-| Supplementary | `diagrams/admin-document-management-flow.drawio` | Admin Console → document upload → ingestion → Pinecone |
+| Supplementary | `diagrams/security-rbac-flow.drawio` | AuthN/AuthZ + RBAC + rate-limit + token-budget flow |
+| Supplementary | `diagrams/admin-document-management-flow.drawio` | Admin Console → ingestion → Pinecone |
+| Supplementary | `diagrams/evaluation-pipeline.drawio` | Accuracy/eval harness loop (docs/15) |
 
 ---
 
@@ -44,38 +48,37 @@ streams every step to LangSmith.
 
 ## L2 — Containers
 
-The ten containers from `01-system-architecture.md §2` (note the **two UI containers**). Key
+The `ai-*` services from `01-system-architecture.md §2` / `docs/13` (full matrix there). Key
 relationships drawn:
 
-- **ui-public** → Gateway: `HTTPS` (chat request, bearer token); Gateway → ui-public: `SSE`
-  (tokens + events).
-- **ui-admin** → Gateway: `HTTPS` to the **admin routes** (document management, feedback,
-  audit) — Administrator-only.
-- Gateway ↔ Keycloak: OIDC token validation (JWKS).
-- Gateway → Agent: internal REST with signed user context (chat path).
-- Gateway → Ingestion: internal REST to `/ingest` (admin document-management path).
-- Agent → Retrieval: hybrid search REST.
-- Agent → MCP: MCP protocol (tool calls).
-- Agent ↔ Redis: checkpointer (short-term memory) + rate-limit read.
-- Agent ↔ Postgres: long-term memory, feedback, audit.
-- Ingestion ↔ Postgres: document registry (status).
-- Retrieval → Pinecone: upsert/query.
-- Retrieval → Embedding Provider: embed query.
-- Agent → LLM Provider: completions/tool-use.
-- All services → LangSmith: traces.
-- Ingestion → Pinecone: upsert (namespaces + metadata) — both batch CLI and admin-triggered.
+- **ui-public** → **ai-assistant-api**: `HTTPS` chat; api → ui-public: `SSE` (tokens + events).
+- **ui-admin** → **ai-admin-service**: `HTTPS` admin ops (Administrator-only).
+- ai-assistant-api ↔ Keycloak: OIDC validation (JWKS).
+- ai-assistant-api → ai-conversation-service: **token-budget pre-check** + user state.
+- ai-assistant-api ↔ Redis: rate-limit buckets.
+- ai-assistant-api → ai-orchestrator: internal REST (signed user context) + SSE.
+- ai-orchestrator → ai-conversation-service: load context (summary+turns+profile) + **cache hit?**; write turns.
+- ai-orchestrator → ai-knowledge-service (retrieval): hybrid search.
+- ai-orchestrator → ai-tool-service: MCP / tool calls.
+- ai-orchestrator → **ai-model-gateway**: all LLM calls.
+- ai-model-gateway → LLM Provider: completions/tool-use; → ai-conversation-service: **token metering**.
+- ai-conversation-service ↔ Redis/Postgres: short-term+cache+usage / long-term+ledger.
+- ai-knowledge-service → Pinecone + Embedding Provider: query/upsert, embed.
+- ai-admin-service → ai-knowledge-service (ingest): document ops; → Postgres/LangSmith: analytics/eval.
+- All services → LangSmith: traces; correlation+session id on every hop (OpenTelemetry for hops).
 
 **Trust boundaries** (drawn as dashed containers):
-1. *Public edge*: ui-public + Gateway.
-2. *Admin edge*: ui-admin + Gateway admin routes (Administrator-only).
-3. *Internal mesh*: Agent, Retrieval, Ingestion, MCP, Redis, Postgres, Keycloak.
+1. *Public edge*: ui-public + ai-assistant-api.
+2. *Admin edge*: ui-admin + ai-admin-service (Administrator-only).
+3. *Internal mesh*: ai-orchestrator, ai-knowledge-service, ai-tool-service, ai-conversation-service, ai-model-gateway, Redis, Postgres, Keycloak.
 4. *Managed cloud*: Pinecone, LLM, Embedding, LangSmith.
 
-## L3 — Component (Agent service)
+## L3 — Component (ai-orchestrator)
 
-Inside `agent`:
+Inside `ai-orchestrator`:
 
 - **Graph Builder** — assembles the LangGraph `StateGraph` with checkpointer.
+- **Router node (first)** — token-aware entry: cache hit? answerable-from-context? else classify & route.
 - **Supervisor node** — intent classification, task decomposition, routing.
 - **Retrieval agent node** — single-shot hybrid search for direct questions.
 - **Research agent node (RLM)** — plan-as-code, decompose, recursive `Send` fan-out,
@@ -86,7 +89,9 @@ Inside `agent`:
 - **Tool registry** — Knowledge Search, MCP client, Python Analysis (sandboxed).
 - **Guardrail components** — input (prompt injection), content (retrieved-data sanitization),
   output (brand + hallucinated-citation + invalid-response).
-- **Memory managers** — short-term (checkpointer) + long-term (vector/Postgres).
+- **Memory client** — reads/writes context via **ai-conversation-service** (short-term checkpointer,
+  long-term memory, semantic cache); does not own the stores itself.
+- **LLM client** — all model calls go through **ai-model-gateway** (routing, fallback, token metering).
 - **Policy Enforcement Point (PEP)** — consults `libs/authz` before every tool call.
 - **Trace emitter** — wraps nodes/tools with LangSmith spans and emits `AgentEvent`s.
 

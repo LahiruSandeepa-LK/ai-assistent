@@ -1,135 +1,65 @@
-<mxfile host="Electron" agent="ai-assistant-design">
-  <diagram id="c4-container" name="C4 L2 - Container">
-    <mxGraphModel dx="1964" dy="2118" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1500" pageHeight="950" background="light-dark(#ffffff, #121212)" math="0" shadow="0">
+<mxfile host="app.diagrams.net" modified="2026-11-09T00:00:00.000Z" agent="ai-assistant-design" version="24.0.0">
+  <diagram id="c4-container" name="C4 L2 - Container (ai-*)">
+    <mxGraphModel dx="1300" dy="860" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1000" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-        <mxCell id="title" parent="1" style="text;html=1;fontSize=16;fontStyle=1;align=left;" value="C4 Level 2 — Container Diagram (monorepo, Docker Compose) — two interfaces" vertex="1">
-          <mxGeometry height="30" width="900" x="790" y="-475" as="geometry" />
-        </mxCell>
-        <mxCell id="pubuser" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#08427B;fontColor=#ffffff;strokeColor=#052E56;" value="Viewer / Analyst / Administrator" vertex="1">
-          <mxGeometry height="40" width="190" x="1340" y="-340" as="geometry" />
-        </mxCell>
-        <mxCell id="adminuser" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#052E56;fontColor=#ffffff;strokeColor=#052E56;" value="Administrator only" vertex="1">
-          <mxGeometry height="40" width="190" x="745" y="-350" as="geometry" />
-        </mxCell>
-        <mxCell id="edge_pub" parent="1" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=none;strokeColor=#CC0000;verticalAlign=top;fontColor=#CC0000;fontStyle=2;" value="Public edge" vertex="1">
-          <mxGeometry height="120" width="300" x="1280" y="-250" as="geometry" />
-        </mxCell>
-        <mxCell id="uipub" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1061B0;fontColor=#ffffff;strokeColor=#0D5091;" value="ui-public&#xa;[Streamlit] — Interface 1&#xa;Chat + Agent Activity Panel" vertex="1">
-          <mxGeometry height="70" width="240" x="1310" y="-215" as="geometry" />
-        </mxCell>
-        <mxCell id="edge_adm" parent="1" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=none;strokeColor=#8E44AD;verticalAlign=top;fontColor=#8E44AD;fontStyle=2;" value="Admin edge (Administrator-only)" vertex="1">
-          <mxGeometry height="130" width="300" x="690" y="-215" as="geometry" />
-        </mxCell>
-        <mxCell id="uiadm" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#6A1B9A;fontColor=#ffffff;strokeColor=#4A148C;" value="ui-admin&#xa;[Streamlit] — Interface 2&#xa;Doc mgmt · KB browser ·&#xa;feedback/audit · trace links" vertex="1">
-          <mxGeometry height="80" width="240" x="720" y="-185" as="geometry" />
-        </mxCell>
-        <mxCell id="gateway" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1061B0;fontColor=#ffffff;strokeColor=#0D5091;verticalAlign=top;spacingTop=8;" value="gateway&#xa;[FastAPI async]&#xa;/api/* chat routes + /admin/* admin routes&#xa;Auth · RBAC · rate limit · validation · SSE" vertex="1">
-          <mxGeometry height="80" width="570" x="850" y="-30" as="geometry" />
-        </mxCell>
-        <mxCell id="mesh_b" parent="1" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=none;strokeColor=#009900;verticalAlign=top;fontColor=#009900;fontStyle=2;" value="Internal mesh" vertex="1">
-          <mxGeometry height="560" width="780" x="780" y="90" as="geometry" />
-        </mxCell>
-        <mxCell id="agent" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1061B0;fontColor=#ffffff;strokeColor=#0D5091;verticalAlign=top;spacingTop=8;" value="agent&#xa;[FastAPI + LangGraph]&#xa;Supervisor · Retrieval · Research(RLM) ·&#xa;Validation · Response · Guardrails · Memory · PEP" vertex="1">
-          <mxGeometry height="110" width="300" x="1210" y="185" as="geometry" />
-        </mxCell>
-        <mxCell id="retrieval" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1061B0;fontColor=#ffffff;strokeColor=#0D5091;" value="retrieval&#xa;[FastAPI async]&#xa;Hybrid search · RRF · rerank · attribution" vertex="1">
-          <mxGeometry height="90" width="230" x="1280" y="360" as="geometry" />
-        </mxCell>
-        <mxCell id="ingest" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#6A1B9A;fontColor=#ffffff;strokeColor=#4A148C;" value="ingest&#xa;[FastAPI + CLI]&#xa;document mgmt: chunk · embed · upsert&#xa;internal /ingest API + batch CLI" vertex="1">
-          <mxGeometry height="90" width="300" x="1120" y="485" as="geometry" />
-        </mxCell>
-        <mxCell id="mcp" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1061B0;fontColor=#ffffff;strokeColor=#0D5091;" value="mcp&#xa;[MCP SDK]&#xa;dummy enterprise data" vertex="1">
-          <mxGeometry height="80" width="230" x="820" y="185" as="geometry" />
-        </mxCell>
-        <mxCell id="redis" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2E7D32;fontColor=#ffffff;strokeColor=#1B5E20;" value="redis&#xa;[Redis]&#xa;checkpointer (short-term mem) · cache · rate buckets" vertex="1">
-          <mxGeometry height="80" width="300" x="1710" y="-30" as="geometry" />
-        </mxCell>
-        <mxCell id="keycloak" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2E7D32;fontColor=#ffffff;strokeColor=#1B5E20;" value="keycloak&#xa;[Keycloak]&#xa;OIDC IdP · realm + 3 roles" vertex="1">
-          <mxGeometry height="70" width="300" x="420" y="-30" as="geometry" />
-        </mxCell>
-        <mxCell id="c0" edge="1" parent="1" source="pubuser" style="endArrow=classic;startArrow=classic;html=1;" target="uipub">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="c0b" edge="1" parent="1" source="adminuser" style="endArrow=classic;startArrow=classic;html=1;" target="uiadm">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="c1" edge="1" parent="1" source="uipub" style="endArrow=classic;startArrow=classic;html=1;fontSize=9;" target="gateway" value="chat / SSE (/api/*)">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="c2" edge="1" parent="1" source="uiadm" style="endArrow=classic;startArrow=classic;html=1;fontSize=9;dashed=1;strokeColor=#8E44AD;" target="gateway" value="admin (/admin/*)">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="c3" edge="1" parent="1" source="gateway" style="endArrow=block;html=1;fontSize=9;" target="keycloak" value="OIDC validate">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="c4" edge="1" parent="1" source="gateway" style="endArrow=classic;startArrow=classic;html=1;fontSize=9;exitX=0.77;exitY=1.025;exitDx=0;exitDy=0;exitPerimeter=0;" target="agent" value="run (signed ctx) / SSE">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="c5" edge="1" parent="1" source="gateway" style="endArrow=block;html=1;fontSize=9;dashed=1;strokeColor=#8E44AD;exitX=0.25;exitY=1;exitDx=0;exitDy=0;" target="ingest" value="/ingest (admin doc ops)">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="c6" edge="1" parent="1" source="agent" style="endArrow=block;html=1;fontSize=9;" target="retrieval" value="hybrid search">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="c7" edge="1" parent="1" source="agent" style="endArrow=block;html=1;fontSize=9;" target="mcp" value="MCP tools">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="c8" edge="1" parent="1" source="agent" style="endArrow=block;html=1;fontSize=9;" target="redis" value="checkpoint/cache">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="c9" edge="1" parent="1" source="agent" style="endArrow=block;html=1;fontSize=9;entryX=0.99;entryY=0.425;entryDx=0;entryDy=0;entryPerimeter=0;" target="vYNFmj_fEIyiYW9FardR-3" value="memory/audit">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="c10" edge="1" parent="1" source="gateway" style="endArrow=block;html=1;fontSize=9;dashed=1;" target="redis" value="rate buckets">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="c11" edge="1" parent="1" source="ingest" style="endArrow=block;html=1;fontSize=9;entryX=1;entryY=0.75;entryDx=0;entryDy=-7.5;entryPerimeter=0;" target="vYNFmj_fEIyiYW9FardR-3" value="doc registry">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="c12" edge="1" parent="1" source="retrieval" style="endArrow=block;html=1;fontSize=9;" target="pinecone" value="query">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="c13" edge="1" parent="1" source="ingest" style="endArrow=block;html=1;fontSize=9;" target="pinecone" value="upsert">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="c14" edge="1" parent="1" source="retrieval" style="endArrow=block;html=1;fontSize=9;" target="embed" value="embed">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="c14b" edge="1" parent="1" source="ingest" style="endArrow=block;html=1;fontSize=9;dashed=1;" target="embed" value="embed">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="c15" edge="1" parent="1" source="agent" style="endArrow=block;html=1;fontSize=9;" target="llm" value="completions / tool-use">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="c16" edge="1" parent="1" source="agent" style="endArrow=block;html=1;fontSize=9;" target="langsmith" value="traces">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="c17" edge="1" parent="1" source="keycloak" style="endArrow=block;html=1;fontSize=9;dashed=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;entryPerimeter=0;" target="vYNFmj_fEIyiYW9FardR-3" value="kc store">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="vYNFmj_fEIyiYW9FardR-1" connectable="0" parent="1" style="group" value="" vertex="1">
-          <mxGeometry height="400" width="520" x="1750" y="195" as="geometry" />
-        </mxCell>
-        <mxCell id="cloud_b" parent="vYNFmj_fEIyiYW9FardR-1" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=none;strokeColor=#888888;verticalAlign=top;fontColor=#888888;fontStyle=2;" value="Managed cloud" vertex="1">
-          <mxGeometry height="400" width="320" as="geometry" />
-        </mxCell>
-        <mxCell id="pinecone" parent="vYNFmj_fEIyiYW9FardR-1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#999999;fontColor=#ffffff;strokeColor=#6c6c6c;" value="Pinecone&#xa;vector DB (dense+sparse)" vertex="1">
-          <mxGeometry height="50" width="230" x="30" y="190" as="geometry" />
-        </mxCell>
-        <mxCell id="llm" parent="vYNFmj_fEIyiYW9FardR-1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#999999;fontColor=#ffffff;strokeColor=#6c6c6c;" value="LLM Provider&#xa;Claude / OpenAI" vertex="1">
-          <mxGeometry height="50" width="230" x="40" y="20" as="geometry" />
-        </mxCell>
-        <mxCell id="embed" parent="vYNFmj_fEIyiYW9FardR-1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#999999;fontColor=#ffffff;strokeColor=#6c6c6c;" value="Embedding Provider" vertex="1">
-          <mxGeometry height="45" width="230" x="40" y="290" as="geometry" />
-        </mxCell>
-        <mxCell id="langsmith" parent="vYNFmj_fEIyiYW9FardR-1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#999999;fontColor=#ffffff;strokeColor=#6c6c6c;" value="LangSmith (tracing)" vertex="1">
-          <mxGeometry height="45" width="230" x="30" y="95" as="geometry" />
-        </mxCell>
-        <mxCell id="vYNFmj_fEIyiYW9FardR-3" parent="1" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fontColor=light-dark(#1e1515, #121212);" value="&lt;b&gt;&lt;font style=&quot;font-size: 18px;&quot;&gt;postgres&lt;br&gt;&lt;/font&gt;&lt;/b&gt;[Postgres]&lt;br&gt;long-term memory · feedback · audit ·&lt;br&gt;document registry · Keycloak store" vertex="1">
-          <mxGeometry height="110" width="320" x="410" y="395" as="geometry" />
-        </mxCell>
+        <mxCell id="title" value="C4 Level 2 — Container Diagram: ABC Bank AI Assistant (ai-* services, Docker Compose)" style="text;html=1;fontSize=16;fontStyle=1;align=left;" vertex="1" parent="1"><mxGeometry x="40" y="20" width="1000" height="30" as="geometry"/></mxCell>
+
+        <mxCell id="pubuser" value="Viewer / Analyst / Administrator" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#08427B;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="60" y="90" width="180" height="40" as="geometry"/></mxCell>
+        <mxCell id="adminuser" value="Administrator only" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#052E56;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="60" y="560" width="180" height="40" as="geometry"/></mxCell>
+
+        <!-- Public edge -->
+        <mxCell id="edge_pub" value="Public edge" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=none;strokeColor=#CC0000;verticalAlign=top;fontColor=#CC0000;fontStyle=2;" vertex="1" parent="1"><mxGeometry x="40" y="150" width="300" height="130" as="geometry"/></mxCell>
+        <mxCell id="uipub" value="ui-public&#10;[Streamlit] — Interface 1&#10;chat + activity panel" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1061B0;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="70" y="185" width="240" height="70" as="geometry"/></mxCell>
+        <mxCell id="api" value="ai-assistant-api&#10;[FastAPI] authN·RBAC·rate-limit&#10;TOKEN gate · input guardrail · SSE" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#0D5091;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="400" y="170" width="260" height="90" as="geometry"/></mxCell>
+
+        <!-- Admin edge -->
+        <mxCell id="edge_adm" value="Admin edge (Administrator-only)" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=none;strokeColor=#8E44AD;verticalAlign=top;fontColor=#8E44AD;fontStyle=2;" vertex="1" parent="1"><mxGeometry x="40" y="430" width="300" height="130" as="geometry"/></mxCell>
+        <mxCell id="uiadm" value="ui-admin&#10;[Streamlit] — Interface 2&#10;console" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#6A1B9A;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="70" y="465" width="240" height="70" as="geometry"/></mxCell>
+        <mxCell id="adm" value="ai-admin-service&#10;[FastAPI] knowledge mgmt ·&#10;tool config · analytics · eval" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#6A1B9A;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="400" y="450" width="260" height="90" as="geometry"/></mxCell>
+
+        <!-- Internal mesh -->
+        <mxCell id="mesh" value="Internal mesh" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=none;strokeColor=#009900;verticalAlign=top;fontColor=#009900;fontStyle=2;" vertex="1" parent="1"><mxGeometry x="720" y="90" width="640" height="720" as="geometry"/></mxCell>
+        <mxCell id="orch" value="ai-orchestrator&#10;[FastAPI + LangGraph]&#10;ROUTER · supervisor · RLM ·&#10;validation · guardrails · PEP" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1061B0;fontColor=#ffffff;verticalAlign=top;spacingTop=8;" vertex="1" parent="1"><mxGeometry x="750" y="120" width="290" height="110" as="geometry"/></mxCell>
+        <mxCell id="know" value="ai-knowledge-service&#10;retrieval (read) + ingestion (write)&#10;hybrid+rerank · chunk→embed→upsert" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1061B0;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="1080" y="120" width="260" height="100" as="geometry"/></mxCell>
+        <mxCell id="mg" value="ai-model-gateway&#10;all LLM calls: routing +&#10;fallback + TOKEN metering" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#B9770E;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="750" y="260" width="290" height="80" as="geometry"/></mxCell>
+        <mxCell id="tool" value="ai-tool-service&#10;[MCP] registry + execution&#10;(external REST/DB) + data" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1061B0;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="1080" y="250" width="260" height="90" as="geometry"/></mxCell>
+        <mxCell id="conv" value="ai-conversation-service&#10;history · memory · summarize-10 ·&#10;semantic cache · TOKEN usage state" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#117A65;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="750" y="370" width="290" height="90" as="geometry"/></mxCell>
+        <mxCell id="redis" value="redis&#10;checkpointer · cache · buckets · usage" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2E7D32;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="750" y="490" width="290" height="70" as="geometry"/></mxCell>
+        <mxCell id="pg" value="postgres&#10;long-term mem · feedback · audit&#10;doc registry · usage ledger · kc store" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2E7D32;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="1080" y="490" width="260" height="90" as="geometry"/></mxCell>
+        <mxCell id="kc" value="keycloak&#10;OIDC IdP · 3 roles" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2E7D32;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="750" y="610" width="290" height="70" as="geometry"/></mxCell>
+
+        <!-- Managed cloud -->
+        <mxCell id="cloud" value="Managed cloud" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=none;strokeColor=#888888;verticalAlign=top;fontColor=#888888;fontStyle=2;" vertex="1" parent="1"><mxGeometry x="400" y="610" width="300" height="300" as="geometry"/></mxCell>
+        <mxCell id="pc" value="Pinecone (vectors)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#999999;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="420" y="650" width="260" height="45" as="geometry"/></mxCell>
+        <mxCell id="llm" value="LLM Provider (Claude/OpenAI)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#999999;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="420" y="705" width="260" height="45" as="geometry"/></mxCell>
+        <mxCell id="emb" value="Embedding Provider" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#999999;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="420" y="760" width="260" height="45" as="geometry"/></mxCell>
+        <mxCell id="ls" value="LangSmith (tracing)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#999999;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="420" y="815" width="260" height="45" as="geometry"/></mxCell>
+
+        <!-- edges -->
+        <mxCell id="c0" style="endArrow=classic;startArrow=classic;html=1;" edge="1" parent="1" source="pubuser" target="uipub"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="c0b" style="endArrow=classic;startArrow=classic;html=1;" edge="1" parent="1" source="adminuser" target="uiadm"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="c1" value="chat/SSE" style="endArrow=classic;startArrow=classic;html=1;fontSize=9;" edge="1" parent="1" source="uipub" target="api"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="c2" value="admin ops" style="endArrow=classic;startArrow=classic;html=1;fontSize=9;dashed=1;strokeColor=#8E44AD;" edge="1" parent="1" source="uiadm" target="adm"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="c3" value="OIDC" style="endArrow=block;html=1;fontSize=9;" edge="1" parent="1" source="api" target="kc"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="c4" value="token check + state" style="endArrow=block;html=1;fontSize=9;" edge="1" parent="1" source="api" target="conv"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="c5" value="run / SSE" style="endArrow=classic;startArrow=classic;html=1;fontSize=9;" edge="1" parent="1" source="api" target="orch"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="c6" value="context + cache?" style="endArrow=classic;startArrow=classic;html=1;fontSize=9;" edge="1" parent="1" source="orch" target="conv"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="c7" value="hybrid search" style="endArrow=block;html=1;fontSize=9;" edge="1" parent="1" source="orch" target="know"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="c8" value="LLM calls" style="endArrow=block;html=1;fontSize=9;" edge="1" parent="1" source="orch" target="mg"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="c9" value="tool calls" style="endArrow=block;html=1;fontSize=9;" edge="1" parent="1" source="orch" target="tool"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="c10" value="metering" style="endArrow=block;html=1;fontSize=9;dashed=1;" edge="1" parent="1" source="mg" target="conv"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="c11" value="completions" style="endArrow=block;html=1;fontSize=9;" edge="1" parent="1" source="mg" target="llm"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="c12" value="query/upsert" style="endArrow=block;html=1;fontSize=9;" edge="1" parent="1" source="know" target="pc"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="c13" value="embed" style="endArrow=block;html=1;fontSize=9;" edge="1" parent="1" source="know" target="emb"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="c14" value="registry" style="endArrow=block;html=1;fontSize=9;dashed=1;" edge="1" parent="1" source="know" target="pg"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="c15" value="short-term/cache/usage" style="endArrow=block;html=1;fontSize=9;" edge="1" parent="1" source="conv" target="redis"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="c16" value="long-term/ledger" style="endArrow=block;html=1;fontSize=9;" edge="1" parent="1" source="conv" target="pg"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="c17" value="rate buckets" style="endArrow=block;html=1;fontSize=9;dashed=1;" edge="1" parent="1" source="api" target="redis"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="c18" value="doc ops / reindex" style="endArrow=block;html=1;fontSize=9;dashed=1;strokeColor=#8E44AD;" edge="1" parent="1" source="adm" target="know"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="c19" value="analytics" style="endArrow=block;html=1;fontSize=9;dashed=1;" edge="1" parent="1" source="adm" target="pg"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="c20" value="traces (all)" style="endArrow=block;html=1;fontSize=9;dashed=1;" edge="1" parent="1" source="orch" target="ls"><mxGeometry relative="1" as="geometry"/></mxCell>
       </root>
     </mxGraphModel>
   </diagram>

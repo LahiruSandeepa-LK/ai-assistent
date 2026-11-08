@@ -38,3 +38,12 @@ graded parts). Vendor dependency is mitigated by isolating it behind the Retriev
 ## Action Items
 1. [ ] Provision sparse-dense index; define namespaces + metadata schema.
 2. [ ] Abstract behind a `VectorStore` interface in the retrieval service.
+
+## Implementation status (2026-11-09)
+Implemented as a drop-in adapter behind one interface (`libs/rag/vectorstore.py` →
+`get_vector_store()`). `libs/rag/vectorstore_pinecone.py` provides the real `PineconeVectorStore`
+(modern `pinecone` SDK): lazy index creation at the live embedding dimension, cosine metric,
+optional namespace (`PINECONE_NAMESPACE`), batched upserts, and reliable delete-by-`doc_id`
+(id tracking with a metadata-filter fallback for pod indexes). Activates automatically when
+`PINECONE_API_KEY` is set; the in-memory cosine index remains the offline default. The engine
+code is unchanged — only the store swaps.

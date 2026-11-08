@@ -1,11 +1,14 @@
-# Dev override: hardcoded auth, hot reload (see docs/10-deployment.md)
+# Dev override: hardcoded auth, hot reload (docs/10-deployment.md)
 services:
-  gateway:
-    environment:
-      - AUTH_MODE=dev
-    volumes: ["./services/gateway:/app", "./libs:/libs"]
-  agent:
-    volumes: ["./services/agent:/app", "./libs:/libs"]
+  ai-assistant-api:
+    environment: ["AUTH_MODE=dev"]
+    volumes: ["./services/ai-assistant-api:/app", "./libs:/libs"]
+  ai-orchestrator:
+    volumes: ["./services/ai-orchestrator:/app", "./libs:/libs"]
+  ai-conversation-service:
+    volumes: ["./services/ai-conversation-service:/app", "./libs:/libs"]
+  ai-model-gateway:
+    volumes: ["./services/ai-model-gateway:/app", "./libs:/libs"]
   ui-public:
     volumes: ["./services/ui-public:/app"]
   ui-admin:
