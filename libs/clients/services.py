@@ -20,6 +20,16 @@ from llm.provider import Completion
 
 _TIMEOUT = float(os.getenv("SERVICE_HTTP_TIMEOUT", "60"))
 
+# The model-gateway may run a full provider chain (primary -> fallback), each with its own
+# LLM_CALL_TIMEOUT window, so the HTTP wait for it must exceed that total budget — otherwise the
+# orchestrator's HTTP client gives up while the gateway is still legitimately working (the 503 the
+# user saw). Default: 2 provider windows + headroom. Override with MODEL_GATEWAY_HTTP_TIMEOUT.
+_CALL_TIMEOUT = float(os.getenv("LLM_CALL_TIMEOUT", "30"))
+_MODEL_GW_TIMEOUT = float(os.getenv("MODEL_GATEWAY_HTTP_TIMEOUT", "0")) or (2 * _CALL_TIMEOUT + 15)
+# The orchestrator sits IN FRONT of the model-gateway, so the api must wait longer than the gateway
+# budget above or it gives up mid-answer. Scales with the LLM budget; override if needed.
+_ORCH_TIMEOUT = float(os.getenv("ORCHESTRATOR_HTTP_TIMEOUT", "0")) or (2 * _CALL_TIMEOUT + 30)
+
 
 def url(env: str) -> str:
     return os.getenv(env, "").rstrip("/")
@@ -89,20 +99,21 @@ def remote_complete(system: str, user: str, model: str, user_id: str) -> Complet
     base = url("MODEL_GATEWAY_URL")
     try:
         r = httpx.post(f"{base}/complete", json={"system": system, "user": user, "model": model,
-                                                 "user_id": user_id}, timeout=_TIMEOUT)
+                                                 "user_id": user_id}, timeout=_MODEL_GW_TIMEOUT)
         r.raise_for_status()
         d = r.json()
     except Exception as e:
         raise _mapped("ai-model-gateway", e) from e
     return Completion(text=d["text"], prompt_tokens=d.get("prompt_tokens", 0),
-                      completion_tokens=d.get("completion_tokens", 0))
+                      completion_tokens=d.get("completion_tokens", 0),
+                      provider=d.get("provider", ""), timed_out=bool(d.get("timed_out", False)))
 
 
 # ---- orchestrator ----
 async def remote_agent_run(user: UserContext, message: str) -> dict:
     base = url("ORCHESTRATOR_URL")
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+        async with httpx.AsyncClient(timeout=_ORCH_TIMEOUT) as c:
             r = await c.post(f"{base}/agent/run", json={"user_id": user.user_id, "roles": user.roles,
                                                         "session_id": user.session_id, "message": message})
             r.raise_for_status()

@@ -19,9 +19,10 @@ from contracts.errors import AppError
 from contracts.models import AgentEvent, UserContext, to_jsonable
 from authz.identity import resolve_user
 from authz.rbac import can_use_tool
-from memory.usage import get_usage_store
+from memory.usage import get_usage_store, get_session_usage, session_cap
 from observability.logging import get_logger, new_correlation_id, set_context, log
 from orchestrator.graph import run as run_graph
+from orchestrator.ops import SESSION_LIMIT_REPLY
 
 app = FastAPI(title="ai-assistant-api")
 logger = get_logger("ai-assistant-api")
@@ -140,6 +141,20 @@ async def chat(req: ChatRequest, authorization: str | None = Header(default=None
             },
         )
 
+    # per-session token cap (hard stop): ask the user to start a new chat
+    sess = get_session_usage()
+    if sess.over_cap(req.session_id):
+        return JSONResponse(
+            status_code=200,
+            content={
+                "answer": SESSION_LIMIT_REPLY,
+                "route": "limit",
+                "citations": [],
+                "events": [],
+                "session": {"used": sess.get(req.session_id), "cap": session_cap(), "remaining": 0},
+            },
+        )
+
     log(logger, "chat_request", route="start", message_len=len(req.message))
 
     if req.stream:
@@ -164,6 +179,9 @@ async def chat(req: ChatRequest, authorization: str | None = Header(default=None
         data = {"answer": _FRIENDLY_ERROR, "route": "error", "citations": [], "events": []}
 
     data["usage"] = to_jsonable(get_usage_store().get(user.user_id, user.top_role))
+    used = sess.get(req.session_id)
+    cap = session_cap()
+    data["session"] = {"used": used, "cap": cap, "remaining": max(0, cap - used) if cap > 0 else None}
     data["correlation_id"] = cid
     return data
 

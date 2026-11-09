@@ -16,6 +16,9 @@ import httpx
 import streamlit as st
 
 API_URL = os.getenv("API_URL", "http://localhost:8000")
+# Must exceed the full LLM budget behind the API (provider chain + service hops), or the browser
+# gives up while the backend is still legitimately working. Scales with LLM_CALL_TIMEOUT.
+_CHAT_TIMEOUT = float(os.getenv("CHAT_HTTP_TIMEOUT", "0")) or (2 * float(os.getenv("LLM_CALL_TIMEOUT", "30")) + 45)
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:8501")
 AUTH_MODE = os.getenv("AUTH_MODE", "dev").lower()
 
@@ -163,8 +166,13 @@ def _chat_view():
         last = st.session_state.get("last")
         if last:
             st.divider()
+            sess = last.get("session", {})
+            used, cap = sess.get("used"), sess.get("cap")
+            if isinstance(used, int) and isinstance(cap, int) and cap > 0:
+                st.caption(f"Session usage: **{used:,} / {cap:,}** tokens")
+                st.progress(min(1.0, used / cap))
             st.caption(f"route: **{last.get('route','?')}** · "
-                       f"usage: {last.get('usage',{}).get('used','?')} tokens")
+                       f"last answer: {last.get('usage',{}).get('used','?')} tokens (period)")
             with st.expander("Agent activity", expanded=False):
                 for e in last.get("events", []):
                     st.json(e, expanded=False)
@@ -190,7 +198,7 @@ def _chat_view():
                     f"{API_URL}/api/chat",
                     headers={"Authorization": f"Bearer {st.session_state.token}"},
                     json={"session_id": st.session_state["sid"], "message": prompt},
-                    timeout=60,
+                    timeout=_CHAT_TIMEOUT,
                 )
                 if r.status_code == 401:
                     st.error("Your session expired — please sign out and sign in again.")
@@ -206,7 +214,10 @@ def _chat_view():
             t = c.get("title") or ""
             if t and t not in titles:
                 titles.append(t)
-        if titles and data.get("route") not in ("greeting", "context", "blocked", "out_of_scope"):
+        if data.get("route") == "limit":
+            st.info("Click **New chat** in the sidebar to start a fresh conversation.")
+        _no_sources = ("greeting", "context", "blocked", "out_of_scope", "limit", "timeout", "error")
+        if titles and data.get("route") not in _no_sources:
             st.caption("Sources: " + " · ".join(titles[:3]))
 
     st.session_state.history.append({"role": "assistant", "content": answer})

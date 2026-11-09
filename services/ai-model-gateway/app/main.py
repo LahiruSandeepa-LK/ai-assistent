@@ -28,4 +28,5 @@ async def health():
 async def complete(body: CompleteBody):
     c = _gw.complete(body.system, body.user, model=body.model, user_id=body.user_id)
     return {"text": c.text, "prompt_tokens": c.prompt_tokens,
-            "completion_tokens": c.completion_tokens, "total_tokens": c.total_tokens}
+            "completion_tokens": c.completion_tokens, "total_tokens": c.total_tokens,
+            "provider": c.provider, "timed_out": c.timed_out}

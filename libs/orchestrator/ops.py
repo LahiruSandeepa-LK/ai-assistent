@@ -33,6 +33,8 @@ OUT_OF_SCOPE_REPLY = ("I'm ABC Bank's assistant, so I can only help with our ban
                       "services — loans, savings and fixed deposits, cards, accounts, exchange "
                       "rates and remittances, and account-opening. Is there something along those "
                       "lines I can help you with?")
+SESSION_LIMIT_REPLY = ("This conversation has reached its length limit. Please start a new chat to "
+                       "continue — I'll be ready to help with a fresh session.")
 
 
 def is_greeting(message: str) -> bool:
@@ -129,6 +131,16 @@ def setup_metering(user: UserContext) -> None:
     gw.on_usage = lambda uid, pt, ct, model: usage.record(uid or user.user_id, pt + ct)
 
 
+def record_session_tokens(user: UserContext, tokens: int) -> None:
+    """Add a completion's tokens to the per-session counter (used for the session cap). Runs in the
+    orchestrator process so it is captured whether the model-gateway is in-process or remote."""
+    try:
+        from memory.usage import get_session_usage
+        get_session_usage().record(user.session_id or "default", int(tokens or 0))
+    except Exception:
+        pass
+
+
 async def retrieve_single(user: UserContext, message: str, cb: Emit = None) -> list[Chunk]:
     emit(cb, "node", node="retrieval_agent")
     emit(cb, "retrieval", status="searching")
@@ -171,6 +183,10 @@ async def synthesize(user: UserContext, message: str, chunks: list[Chunk], cb: E
     emit(cb, "node", node="response")
     ctx = format_context(chunks)
     comp = gw.complete(prompts.SYNTHESIZE, f"QUESTION: {message}\n\nCONTEXT:\n{ctx}", model="strong", user_id=user.user_id)
+    record_session_tokens(user, comp.total_tokens)
+    if getattr(comp, "timed_out", False):
+        emit(cb, "validation", verdict="timeout", reason="all LLM providers timed out")
+        return Answer(text=comp.text, route="timeout", degraded=True)
     text = guardrails.redact_secrets(comp.text)
 
     # validate citations against retrieved context BEFORE stripping the markers
@@ -200,6 +216,9 @@ async def context_answer(user: UserContext, message: str, bundle: dict, cb: Emit
     hist = "\n".join(f"{r}: {t}" for r, t in turns)
     c = gw.complete(prompts.CONTEXT, f"QUESTION: {message}\n\nRELEVANT CONVERSATION:\n{hist}",
                     model="fast", user_id=user.user_id)
+    record_session_tokens(user, c.total_tokens)
+    if getattr(c, "timed_out", False):
+        return Answer(text=c.text, route="timeout", degraded=True)
     return Answer(text=strip_markers(guardrails.redact_secrets(c.text)), route="context",
                   tokens=c.total_tokens)
 

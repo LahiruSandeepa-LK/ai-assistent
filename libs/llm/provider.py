@@ -12,6 +12,8 @@ class Completion:
     text: str
     prompt_tokens: int
     completion_tokens: int
+    provider: str = ""        # which provider actually produced this (filled by the gateway)
+    timed_out: bool = False   # True = every provider timed out/failed; text is a timeout message
 
     @property
     def total_tokens(self) -> int:

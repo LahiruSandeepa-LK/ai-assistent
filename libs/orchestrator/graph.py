@@ -59,6 +59,15 @@ async def run(user: UserContext, message: str, emit: Emit = None) -> Answer:
     sid = user.session_id or "default"
     conv.add_user(sid, message, user.user_id)
 
+    # per-session token cap: once a chat has spent its budget, stop and ask for a new session
+    # (no LLM, no retrieval). Cap is SESSION_TOKEN_CAP (default 100k); 0 disables it.
+    from memory.usage import get_session_usage
+    if get_session_usage().over_cap(sid):
+        ans = Answer(text=ops.SESSION_LIMIT_REPLY, route="limit")
+        conv.add_assistant(sid, ans.text, user.user_id)
+        ops.emit(emit, "final", answer=ans.text, route="limit")
+        return ans
+
     # input guardrail
     ok, reason = guardrails.screen_input(message)
     if not ok:
@@ -110,7 +119,7 @@ async def run(user: UserContext, message: str, emit: Emit = None) -> Answer:
         ans = await _pipeline_core(user, message, emit)
 
     conv.add_assistant(sid, ans.text, user.user_id)
-    if ans.route not in ("blocked", "context"):
+    if ans.route not in ("blocked", "context", "timeout", "limit", "out_of_scope", "error"):
         conv.cache_store(sid, message, ans.text, ans.citations)
     ops.maybe_summarize(user, sid)
     ops.emit(emit, "final", answer=ans.text, route=ans.route,

@@ -7,12 +7,30 @@ from typing import Callable, Optional
 import os
 import time
 
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+
 from .provider import BaseProvider, Completion, build_provider, get_provider
 
 # How much of each prompt/response to log. Set LLM_LOG_FULL=true to log the complete text
 # (otherwise previews are truncated to LLM_LOG_PREVIEW chars). docs/07.
 _LOG_FULL = os.getenv("LLM_LOG_FULL", "false").lower() in ("1", "true", "yes")
 _LOG_PREVIEW = int(os.getenv("LLM_LOG_PREVIEW", "500"))
+
+# Per-provider wall-clock budget. If a provider doesn't respond within this many seconds we abandon
+# it and switch to the next provider in the chain. Read live so it's env-configurable. docs/14 §2.
+def _call_timeout() -> float:
+    try:
+        return float(os.getenv("LLM_CALL_TIMEOUT", "30"))
+    except ValueError:
+        return 30.0
+
+
+# Shown to the customer when EVERY provider in the chain timed out or errored.
+_TIMEOUT_MESSAGE = ("I'm sorry — I'm taking longer than usual to respond right now. Please try your "
+                    "question again in a moment.")
+
+# A small pool to run each (blocking) provider call under a timeout.
+_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="llm")
 
 
 def _clip(text: str) -> str:
@@ -53,47 +71,64 @@ class ModelGateway:
                 # fall through to the local path below
 
         from observability.logging import log
+        import sys
+
+        # Ordered provider chain: primary (LLM_PROVIDER) -> fallback (LLM_FALLBACK). Each gets its
+        # own timeout window; if one times out or errors we move to the next. We do NOT add a
+        # silent MockProvider here — when every real provider is exhausted we return a clear timeout
+        # response to the caller instead of a fabricated answer. (In offline mode the primary IS the
+        # mock, so it answers instantly and the chain never reaches a timeout.)
+        chain: list[BaseProvider] = []
+        for p in (self.provider, self.fallback):
+            if p is not None and p not in chain:
+                chain.append(p)
 
         provider_name = getattr(self.provider, "name", "?")
-        t0 = time.time()
-        # ---- log the LLM REQUEST ----
+        # ---- log the LLM REQUEST (once) ----
+        tmo = _call_timeout()
         log(self._log, "llm_request", provider=provider_name, model=model, user_id=user_id,
+            chain=[getattr(p, "name", "?") for p in chain], timeout_s=tmo,
             system=_clip(system), prompt=_clip(user))
-        try:
-            c = self.provider.complete(system, user, model=model)
-            used_provider = provider_name
-        except Exception as e:
-            # Resilience (ADR-003/E1): a provider failure (bad key, unavailable model, egress
-            # blocked, rate limit) must not 500 the gateway. Log the real cause, then fall back to
-            # the configured LLM_FALLBACK provider, and finally to the deterministic MockProvider
-            # so chat always returns a grounded (if degraded) answer.
-            import sys
 
-            pname = getattr(self.provider, "name", "?")
-            print(f"[model-gateway] provider '{pname}' failed for model '{model}': {e!r} — "
-                  f"falling back", file=sys.stderr, flush=True)
-            fb = self.fallback
-            if fb is None:
-                from .provider import MockProvider
-
-                fb = MockProvider()
+        last_err: Exception | None = None
+        for p in chain:
+            pname = getattr(p, "name", "?")
+            t0 = time.time()
             try:
-                c = fb.complete(system, user, model=model)
-            except Exception:
-                from .provider import MockProvider
+                fut = _POOL.submit(p.complete, system, user, model=model)
+                c = fut.result(timeout=tmo)
+            except FutureTimeout as e:
+                last_err = e
+                fut.cancel()
+                print(f"[model-gateway] provider '{pname}' timed out after {tmo:.0f}s for "
+                      f"model '{model}' — switching to next provider", file=sys.stderr, flush=True)
+                log(self._log, "llm_timeout", provider=pname, model=model, user_id=user_id,
+                    timeout_s=tmo)
+                continue
+            except Exception as e:
+                last_err = e
+                print(f"[model-gateway] provider '{pname}' failed for model '{model}': {e!r} — "
+                      f"switching to next provider", file=sys.stderr, flush=True)
+                continue
+            # success
+            c.provider = pname
+            log(self._log, "llm_response", provider=pname, model=model, user_id=user_id,
+                latency_ms=int((time.time() - t0) * 1000), prompt_tokens=c.prompt_tokens,
+                completion_tokens=c.completion_tokens, total_tokens=c.total_tokens,
+                response=_clip(c.text))
+            if self.on_usage:
+                try:
+                    self.on_usage(user_id, c.prompt_tokens, c.completion_tokens, model)
+                except Exception:
+                    pass
+            return c
 
-                c = MockProvider().complete(system, user, model=model)
-            used_provider = f"fallback:{getattr(fb, 'name', 'mock')}"
-        # ---- log the LLM RESPONSE ----
-        log(self._log, "llm_response", provider=used_provider, model=model, user_id=user_id,
-            latency_ms=int((time.time() - t0) * 1000), prompt_tokens=c.prompt_tokens,
-            completion_tokens=c.completion_tokens, response=_clip(c.text))
-        if self.on_usage:
-            try:
-                self.on_usage(user_id, c.prompt_tokens, c.completion_tokens, model)
-            except Exception:
-                pass
-        return c
+        # every provider timed out / failed -> return a timeout completion (no mock, no 500)
+        print(f"[model-gateway] all providers exhausted for model '{model}' "
+              f"(last error: {last_err!r}) — returning timeout response", file=sys.stderr, flush=True)
+        log(self._log, "llm_exhausted", model=model, user_id=user_id,
+            tried=[getattr(p, "name", "?") for p in chain], last_error=repr(last_err))
+        return Completion(_TIMEOUT_MESSAGE, 0, 0, provider="timeout", timed_out=True)
 
 
 _GATEWAY: ModelGateway | None = None
