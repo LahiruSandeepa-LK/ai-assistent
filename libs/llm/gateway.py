@@ -38,11 +38,19 @@ class ModelGateway:
 
     def _complete(self, system: str, user: str, *, model: str = "strong", user_id: str = "") -> Completion:
         # True service-to-service: when MODEL_GATEWAY_URL is set, call the ai-model-gateway service
-        # over HTTP (which does its own metering + logging). Otherwise complete in-process.
+        # over HTTP. If that service is unreachable/slow/erroring, degrade to a LOCAL completion
+        # (provider -> mock) rather than propagating a 500 to the orchestrator.
         if os.getenv("MODEL_GATEWAY_URL"):
             from clients.services import remote_complete
 
-            return remote_complete(system, user, model, user_id)
+            try:
+                return remote_complete(system, user, model, user_id)
+            except Exception as e:
+                import sys
+
+                print(f"[gateway] model-gateway service call failed: {e!r} — completing locally",
+                      file=sys.stderr, flush=True)
+                # fall through to the local path below
 
         from observability.logging import log
 

@@ -18,6 +18,13 @@ def _remote(env: str) -> bool:
     return bool(os.getenv(env))
 
 
+def _degraded(service: str, exc: Exception) -> None:
+    import sys
+
+    print(f"[tools] {service} unavailable ({exc!r}); using in-process fallback",
+          file=sys.stderr, flush=True)
+
+
 @traced(name="tool.knowledge_search", run_type="retriever")
 async def knowledge_search(user: UserContext, query: str, *, top_k: int = 6, filters: dict | None = None) -> RetrievalResult:
     enforce_tool(user, "knowledge_search")
@@ -25,10 +32,17 @@ async def knowledge_search(user: UserContext, query: str, *, top_k: int = 6, fil
     if _remote("KNOWLEDGE_RETRIEVAL_URL"):
         from clients.services import remote_search
 
-        return await remote_search(query, top_k, filters or {}, access)
+        try:
+            return await remote_search(query, top_k, filters or {}, access)
+        except Exception as e:
+            _degraded("knowledge-retrieval", e)  # fall through to the in-process index
     req = RetrievalRequest(query=query, top_k=top_k, filters=filters or {}, rerank=True,
                            access_level_max=access)
-    return await get_index().search(req)
+    try:
+        return await get_index().search(req)
+    except Exception as e:
+        _degraded("in-process index", e)
+        return RetrievalResult(chunks=[], degraded=True, note="retrieval unavailable")
 
 
 @traced(name="tool.web_search", run_type="tool")
@@ -37,8 +51,11 @@ async def web_search(user: UserContext, query: str, *, k: int = 3) -> list[Chunk
     if _remote("TOOL_SERVICE_URL"):
         from clients.services import chunk_from_json, remote_tool_call
 
-        data = await remote_tool_call(user, "web_search", {"query": query})
-        return [chunk_from_json(x) for x in data.get("chunks", [])]
+        try:
+            data = await remote_tool_call(user, "web_search", {"query": query})
+            return [chunk_from_json(x) for x in data.get("chunks", [])]
+        except Exception as e:
+            _degraded("ai-tool-service", e)  # fall through to in-process web search
     return tool_web.search(query, k)
 
 
@@ -48,8 +65,11 @@ async def document_parser(user: UserContext, source: str, *, filename: str = "",
     if _remote("TOOL_SERVICE_URL"):
         from clients.services import chunk_from_json, remote_tool_call
 
-        data = await remote_tool_call(user, "document_parser", {"content": source, "filename": filename})
-        return [chunk_from_json(x) for x in data.get("chunks", [])]
+        try:
+            data = await remote_tool_call(user, "document_parser", {"content": source, "filename": filename})
+            return [chunk_from_json(x) for x in data.get("chunks", [])]
+        except Exception as e:
+            _degraded("ai-tool-service", e)  # fall through to in-process parser
     return tool_docparser.parse(source, filename=filename, doc_id=doc_id)
 
 
@@ -57,11 +77,19 @@ async def document_parser(user: UserContext, source: str, *, filename: str = "",
 async def mcp(user: UserContext, resource: str, query: str = "") -> list[Chunk]:
     """Call the MCP server (real over stdio when MCP_SERVER_CMD set; else in-process)."""
     enforce_tool(user, "mcp")
+    records: list = []
     if _remote("TOOL_SERVICE_URL"):
         from clients.services import remote_tool_call
 
-        data = await remote_tool_call(user, "mcp", {"resource": resource, "query": query})
-        records = data.get("records", [])
+        try:
+            data = await remote_tool_call(user, "mcp", {"resource": resource, "query": query})
+            records = data.get("records", [])
+        except Exception as e:
+            _degraded("ai-tool-service", e)
+            try:
+                records = await mcp_client.call_tool(resource, {"query": query})
+            except Exception:
+                records = []
     else:
         records = await mcp_client.call_tool(resource, {"query": query})
     chunks: list[Chunk] = []

@@ -26,6 +26,9 @@ from orchestrator.graph import run as run_graph
 app = FastAPI(title="ai-assistant-api")
 logger = get_logger("ai-assistant-api")
 
+_FRIENDLY_ERROR = ("I'm having trouble answering right now. Please try again in a moment — if it "
+                   "keeps happening, contact an ABC Bank branch for help.")
+
 # ---- simple in-memory token-bucket rate limit (per user) ----
 _RATE = {"Viewer": 20, "Analyst": 60, "Administrator": 120}  # per minute
 _buckets: dict[str, tuple[float, float]] = {}  # user -> (tokens, last_ts)
@@ -126,26 +129,27 @@ async def chat(req: ChatRequest, authorization: str | None = Header(default=None
     if req.stream:
         return StreamingResponse(_stream(user, req.message, cid), media_type="text/event-stream")
 
-    # True service-to-service: delegate to the ai-orchestrator service over HTTP when configured;
-    # otherwise run the orchestrator in-process (offline/POC). Either way the gateway meters usage.
-    if os.getenv("ORCHESTRATOR_URL"):
-        from clients.services import remote_agent_run
+    # Any inference failure (upstream service down/slow, LLM error) degrades to a friendly answer
+    # instead of a 500. The orchestrator also guards itself; this is defence in depth at the edge.
+    try:
+        # True service-to-service: delegate to the ai-orchestrator service over HTTP when
+        # configured; otherwise run the orchestrator in-process (offline/POC).
+        if os.getenv("ORCHESTRATOR_URL"):
+            from clients.services import remote_agent_run
 
-        data = await remote_agent_run(user, req.message)
-        data["usage"] = to_jsonable(get_usage_store().get(user.user_id, user.top_role))
-        data["correlation_id"] = cid
-        return data
+            data = await remote_agent_run(user, req.message)
+        else:
+            events: list[dict] = []
+            ans = await run_graph(user, req.message, emit=lambda e: events.append(e.to_dict()))
+            data = {"answer": ans.text, "route": ans.route,
+                    "citations": [to_jsonable(c) for c in ans.citations], "events": events}
+    except Exception as e:
+        log(logger, "chat_error", error=str(e), error_type=type(e).__name__)
+        data = {"answer": _FRIENDLY_ERROR, "route": "error", "citations": [], "events": []}
 
-    events: list[dict] = []
-    ans = await run_graph(user, req.message, emit=lambda e: events.append(e.to_dict()))
-    return {
-        "answer": ans.text,
-        "route": ans.route,
-        "citations": [to_jsonable(c) for c in ans.citations],
-        "events": events,
-        "usage": to_jsonable(get_usage_store().get(user.user_id, user.top_role)),
-        "correlation_id": cid,
-    }
+    data["usage"] = to_jsonable(get_usage_store().get(user.user_id, user.top_role))
+    data["correlation_id"] = cid
+    return data
 
 
 async def _stream(user: UserContext, message: str, cid: str):
@@ -163,5 +167,11 @@ async def _stream(user: UserContext, message: str, cid: str):
             yield f"event: {item['type']}\ndata: {json.dumps(item)}\n\n"
         except asyncio.TimeoutError:
             continue
-    ans = task.result()
-    yield f"event: done\ndata: {json.dumps({'answer': ans.text, 'route': ans.route})}\n\n"
+    # surface a graceful done event even if the run raised, instead of breaking the SSE stream
+    try:
+        ans = task.result()
+        payload = {"answer": ans.text, "route": ans.route}
+    except Exception as e:
+        log(logger, "chat_error", error=str(e), error_type=type(e).__name__)
+        payload = {"answer": _FRIENDLY_ERROR, "route": "error"}
+    yield f"event: done\ndata: {json.dumps(payload)}\n\n"

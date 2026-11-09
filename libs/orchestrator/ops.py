@@ -94,6 +94,9 @@ async def run_tool(user, message: str, cb: Emit = None) -> list:
     except AuthzError as e:
         emit(cb, "validation", verdict="unauthorized", tool=sel["tool"], reason=e.message)
         return []
+    except Exception as e:  # upstream/tool failure -> degrade to no tool evidence, never 500
+        emit(cb, "validation", verdict="tool_error", tool=sel["tool"], reason=str(e))
+        return []
     return []
 
 
