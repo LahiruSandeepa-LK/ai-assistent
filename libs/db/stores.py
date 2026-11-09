@@ -22,15 +22,56 @@ class PgConversationStore(ConversationStore):
         init_db()
         self._sm = get_sessionmaker()
 
-    def add_user(self, session_id: str, text: str) -> None:
+    def add_user(self, session_id: str, text: str, user_id: str = "") -> None:
         with self._sm() as s:
-            s.add(ConversationTurn(session_id=session_id, role="user", text=text, ts=time.time()))
+            s.add(ConversationTurn(session_id=session_id, user_id=user_id, role="user",
+                                   text=text, ts=time.time()))
             s.commit()
 
-    def add_assistant(self, session_id: str, text: str) -> None:
+    def add_assistant(self, session_id: str, text: str, user_id: str = "") -> None:
         with self._sm() as s:
-            s.add(ConversationTurn(session_id=session_id, role="assistant", text=text, ts=time.time()))
+            s.add(ConversationTurn(session_id=session_id, user_id=user_id, role="assistant",
+                                   text=text, ts=time.time()))
             s.commit()
+
+    def relevant_turns(self, session_id: str, query: str, k: int = 3,
+                       threshold: float = 0.35) -> list[tuple[str, str]]:
+        """Semantic retrieval over THIS session's turns only (memory-as-RAG)."""
+        from rag.embeddings import cosine
+        with self._sm() as s:
+            rows = s.execute(
+                select(ConversationTurn).where(ConversationTurn.session_id == session_id)
+                .order_by(ConversationTurn.id.asc())).scalars().all()
+        if not rows:
+            return []
+        qv = self._embedder.embed(query)
+        scored = [(cosine(qv, self._embedder.embed(r.text)), r) for r in rows]
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [(r.role, r.text) for sim, r in scored[:k] if sim >= threshold]
+
+    def list_user_sessions(self, user_id: str, limit: int = 3,
+                           exclude_session: str = "") -> list[dict]:
+        """The user's previous sessions (for read-only UI history); never fed to the agent."""
+        with self._sm() as s:
+            rows = s.execute(
+                select(ConversationTurn).where(ConversationTurn.user_id == user_id)
+                .order_by(ConversationTurn.id.asc())).scalars().all()
+        sessions: dict[str, list] = {}
+        for r in rows:
+            if r.session_id == exclude_session:
+                continue
+            sessions.setdefault(r.session_id, []).append(r)
+        out = []
+        for sid, turns in sessions.items():
+            first = next((t for t in turns if t.role == "user"), turns[0])
+            out.append({
+                "session_id": sid,
+                "title": first.text[:60] + ("…" if len(first.text) > 60 else ""),
+                "started_at": turns[0].ts,
+                "turns": [(t.role, t.text) for t in turns],
+            })
+        out.sort(key=lambda r: r["started_at"], reverse=True)
+        return out[:limit]
 
     def recent_turns(self, session_id: str) -> list[Turn]:
         with self._sm() as s:

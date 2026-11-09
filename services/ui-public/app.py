@@ -120,13 +120,46 @@ def _login_view():
                     st.rerun()
 
 
+def _fetch_history() -> list[dict]:
+    """The user's previous sessions (read-only). Never fed to the agent."""
+    try:
+        r = httpx.get(f"{API_URL}/api/history",
+                      params={"session_id": st.session_state.get("sid", "")},
+                      headers={"Authorization": f"Bearer {st.session_state.token}"}, timeout=15)
+        return r.json().get("sessions", []) if r.status_code == 200 else []
+    except Exception:
+        return []
+
+
 def _chat_view():
+    import uuid
+    # a fresh session id per login — a new session starts with an empty chat and no prior history
+    st.session_state.setdefault("sid", uuid.uuid4().hex)
+
     with st.sidebar:
         st.markdown(f"**Signed in** · {st.session_state.get('identity','')}")
-        if st.button("Sign out", use_container_width=True):
-            for k in ("token", "identity", "history", "last"):
+        c1, c2 = st.columns(2)
+        if c1.button("New chat", use_container_width=True):
+            for k in ("sid", "history", "last"):
                 st.session_state.pop(k, None)
             st.rerun()
+        if c2.button("Sign out", use_container_width=True):
+            for k in ("token", "identity", "history", "last", "sid"):
+                st.session_state.pop(k, None)
+            st.rerun()
+
+        # --- Recent conversations (last 3 sessions), shown separately, read-only ---
+        st.divider()
+        st.markdown("**Recent conversations**")
+        sessions = _fetch_history()
+        if not sessions:
+            st.caption("No earlier conversations yet.")
+        for sess in sessions:
+            with st.expander(sess.get("title") or "Conversation", expanded=False):
+                for role, text in sess.get("turns", []):
+                    who = "You" if role == "user" else "Assistant"
+                    st.markdown(f"**{who}:** {text}")
+
         last = st.session_state.get("last")
         if last:
             st.divider()
@@ -156,7 +189,7 @@ def _chat_view():
                 r = httpx.post(
                     f"{API_URL}/api/chat",
                     headers={"Authorization": f"Bearer {st.session_state.token}"},
-                    json={"session_id": st.session_state.get("sid", "ui-session"), "message": prompt},
+                    json={"session_id": st.session_state["sid"], "message": prompt},
                     timeout=60,
                 )
                 if r.status_code == 401:

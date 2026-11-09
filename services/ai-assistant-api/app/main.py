@@ -101,6 +101,22 @@ async def me(authorization: str | None = Header(default=None)):
     return {"user_id": user.user_id, "roles": user.roles}
 
 
+@app.get("/api/history")
+async def history(session_id: str = "", authorization: str | None = Header(default=None)):
+    """The signed-in user's previous sessions (read-only, for the UI history panel). This is NOT
+    fed to the agent — new sessions start fresh. Excludes the current session_id."""
+    user = _auth(authorization, "default")
+    from memory.conversation import get_conversation_store, HISTORY_SESSIONS
+
+    try:
+        sessions = get_conversation_store().list_user_sessions(
+            user.user_id, limit=HISTORY_SESSIONS, exclude_session=session_id)
+    except Exception as e:
+        log(logger, "history_error", error=str(e))
+        sessions = []
+    return {"sessions": sessions}
+
+
 @app.post("/api/chat")
 async def chat(req: ChatRequest, authorization: str | None = Header(default=None)):
     cid = new_correlation_id()

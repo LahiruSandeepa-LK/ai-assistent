@@ -17,6 +17,7 @@ class ConversationTurn(Base):
     __tablename__ = "conversation_turns"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     session_id: Mapped[str] = mapped_column(String(128), index=True)
+    user_id: Mapped[str] = mapped_column(String(128), index=True, default="")
     role: Mapped[str] = mapped_column(String(16))
     text: Mapped[str] = mapped_column(Text)
     ts: Mapped[float] = mapped_column(Float)
@@ -84,8 +85,30 @@ def get_sessionmaker():
 
 
 def init_db() -> None:
-    """Create tables if absent. Safe to call on every startup."""
+    """Create tables if absent, then apply additive migrations. Safe to call on every startup."""
     Base.metadata.create_all(get_engine())
+    _migrate()
+
+
+# Additive, idempotent migrations for already-deployed schemas (create_all never ALTERs an
+# existing table). Each statement uses IF NOT EXISTS so re-running is a no-op.
+_MIGRATIONS = (
+    "ALTER TABLE conversation_turns ADD COLUMN IF NOT EXISTS user_id VARCHAR(128) DEFAULT ''",
+)
+
+
+def _migrate() -> None:
+    from sqlalchemy import text
+
+    try:
+        with get_engine().begin() as conn:
+            for stmt in _MIGRATIONS:
+                try:
+                    conn.execute(text(stmt))
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
 
 def pg_enabled() -> bool:

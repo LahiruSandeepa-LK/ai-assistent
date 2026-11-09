@@ -11,7 +11,7 @@ import os
 from .provider import BaseProvider, Completion
 
 # "strong" for synthesis/validation, "fast" for routing/decomposition/summarise (docs/14 §2).
-# Default to gemini-2.5-flash: generally available (incl. to new accounts) and low-latency. Model
+# Default to gemini-3.8-flash: generally available (incl. to new accounts) and low-latency. Model
 # slugs are retired over time, so these are env-overridable AND the adapter self-heals to
 # GEMINI_MODEL_FALLBACK on a NOT_FOUND / "no longer available" error.
 _MODELS = {

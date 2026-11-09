@@ -108,7 +108,7 @@ the offline mock to a real model is **config only** — no code change:
 export LLM_PROVIDER=gemini
 export GEMINI_API_KEY=...                 # from Google AI Studio
 export GEMINI_MODEL_STRONG=gemini-2.5-pro   # synthesis/validation (set to a model you have)
-export GEMINI_MODEL_FAST=gemini-2.5-flash   # routing/summarise (cheaper)
+export GEMINI_MODEL_FAST=gemini-3.8-flash   # routing/summarise (cheaper)
 pip install google-genai
 # optional resilience: fall back to another provider on error (ADR-003 / E1)
 export LLM_FALLBACK=openai   OPENAI_API_KEY=...

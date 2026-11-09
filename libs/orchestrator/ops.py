@@ -128,17 +128,17 @@ def setup_metering(user: UserContext) -> None:
 async def retrieve_single(user: UserContext, message: str, cb: Emit = None) -> list[Chunk]:
     emit(cb, "node", node="retrieval_agent")
     emit(cb, "retrieval", status="searching")
-    res = await tools.knowledge_search(user, message, top_k=6)
+    res = await tools.knowledge_search(user, message, top_k=5)
     return res.chunks
 
 
 async def subretrieve(user: UserContext, sub_question: str, cb: Emit = None) -> list[Chunk]:
     emit(cb, "retrieval", status="searching", sub_question=sub_question)
-    res = await tools.knowledge_search(user, sub_question, top_k=6)
+    res = await tools.knowledge_search(user, sub_question, top_k=5)
     return res.chunks
 
 
-def merge_chunks(groups: list[list[Chunk]], limit: int = 8) -> list[Chunk]:
+def merge_chunks(groups: list[list[Chunk]], limit: int = 5) -> list[Chunk]:
     seen: dict[str, Chunk] = {}
     for g in groups:
         for c in g:
@@ -185,12 +185,16 @@ async def synthesize(user: UserContext, message: str, chunks: list[Chunk], cb: E
 
 
 async def context_answer(user: UserContext, message: str, bundle: dict, cb: Emit = None) -> Answer:
+    """Answer a follow-up using ONLY the prior turns in this session that are relevant to the
+    question (memory-as-RAG) — not the whole conversation history."""
     gw = get_gateway()
-    hist = "\n".join(f"{r}: {t}" for r, t in bundle.get("recent_turns", []))
-    if not hist:
+    turns = get_conversation_store().relevant_turns(user.session_id or "default", message)
+    if not turns:
         return Answer(text="Sure — what would you like to know about ABC Bank's products or services?",
                       route="context")
-    c = gw.complete(prompts.CONTEXT, f"QUESTION: {message}\n\nCONVERSATION:\n{hist}",
+    emit(cb, "memory", retrieved_turns=len(turns))
+    hist = "\n".join(f"{r}: {t}" for r, t in turns)
+    c = gw.complete(prompts.CONTEXT, f"QUESTION: {message}\n\nRELEVANT CONVERSATION:\n{hist}",
                     model="fast", user_id=user.user_id)
     return Answer(text=strip_markers(guardrails.redact_secrets(c.text)), route="context",
                   tokens=c.total_tokens)

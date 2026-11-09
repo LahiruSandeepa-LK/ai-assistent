@@ -57,21 +57,21 @@ async def run(user: UserContext, message: str, emit: Emit = None) -> Answer:
     ops.setup_metering(user)
     conv = get_conversation_store()
     sid = user.session_id or "default"
-    conv.add_user(sid, message)
+    conv.add_user(sid, message, user.user_id)
 
     # input guardrail
     ok, reason = guardrails.screen_input(message)
     if not ok:
         ops.emit(emit, "validation", verdict="blocked", reason=reason)
         ans = Answer(text="I can't help with that request.", route="blocked")
-        conv.add_assistant(sid, ans.text)
+        conv.add_assistant(sid, ans.text, user.user_id)
         ops.emit(emit, "final", answer=ans.text, route=ans.route)
         return ans
 
     # greeting / pleasantry: friendly welcome, no retrieval or LLM, no history dump
     if ops.is_greeting(message):
         ans = Answer(text=ops.GREETING_REPLY, route="greeting")
-        conv.add_assistant(sid, ans.text)
+        conv.add_assistant(sid, ans.text, user.user_id)
         ops.emit(emit, "final", answer=ans.text, route="greeting")
         return ans
 
@@ -84,7 +84,7 @@ async def run(user: UserContext, message: str, emit: Emit = None) -> Answer:
         # cache stores citations as plain dicts (JSON-safe); rebuild Citation objects
         cites = [Citation(**c) if isinstance(c, dict) else c for c in (cites or [])]
         ans = Answer(text=text, citations=cites, route="cache")
-        conv.add_assistant(sid, ans.text)
+        conv.add_assistant(sid, ans.text, user.user_id)
         ops.emit(emit, "final", answer=ans.text, route="cache")
         return ans
 
@@ -95,7 +95,7 @@ async def run(user: UserContext, message: str, emit: Emit = None) -> Answer:
     else:
         ans = await _pipeline_core(user, message, emit)
 
-    conv.add_assistant(sid, ans.text)
+    conv.add_assistant(sid, ans.text, user.user_id)
     if ans.route not in ("blocked", "context"):
         conv.cache_store(sid, message, ans.text, ans.citations)
     ops.maybe_summarize(user, sid)

@@ -36,12 +36,17 @@ def get_embedder():
     provider = os.getenv("EMBEDDING_PROVIDER", "").lower()
     if provider in ("", "hashing", "local"):
         return HashingEmbedder()
-    # Real provider hook (only if deps + key are present).
+    # Real provider hooks (only if deps + key are present). Each probes at construction; on any
+    # failure we fall back to the offline HashingEmbedder so the index dimension stays consistent.
     try:  # pragma: no cover
         if provider == "openai":
             from .embeddings_openai import OpenAIEmbedder  # type: ignore
 
             return OpenAIEmbedder()
+        if provider == "gemini":
+            from .embeddings_gemini import GeminiEmbedder  # type: ignore
+
+            return GeminiEmbedder()
     except Exception:
         pass
     return HashingEmbedder()

@@ -36,12 +36,18 @@ class Turn:
     ts: float = field(default_factory=time.time)
 
 
+RELEVANT_TURNS_K = int(os.getenv("MEMORY_RELEVANT_K", "3"))
+RELEVANT_TURNS_THRESHOLD = float(os.getenv("MEMORY_RELEVANT_THRESHOLD", "0.35"))
+HISTORY_SESSIONS = int(os.getenv("HISTORY_SESSIONS", "3"))
+
+
 @dataclass
 class Session:
     session_id: str
     turns: list[Turn] = field(default_factory=list)
     summary: str = ""
     user_query_count: int = 0
+    user_id: str = ""
 
 
 class ConversationStore:
@@ -112,14 +118,50 @@ class ConversationStore:
             pass
         self._cache.setdefault(session_id, []).append((vec, answer, cites))
 
-    # ---- turns + summarization cadence ----
-    def add_user(self, session_id: str, text: str) -> None:
+    # ---- memory-as-RAG: only the turns in THIS session that are relevant to the query ----
+    def relevant_turns(self, session_id: str, query: str, k: int = RELEVANT_TURNS_K,
+                       threshold: float = RELEVANT_TURNS_THRESHOLD) -> list[tuple[str, str]]:
+        """Return up to k prior turns from this session semantically relevant to `query`. Used
+        instead of dumping the whole history into the prompt. Session-scoped only — never crosses
+        sessions, so a new session starts with nothing to retrieve."""
         s = self.get(session_id)
+        if not s.turns:
+            return []
+        qv = self._embedder.embed(query)
+        scored = [(cosine(qv, self._embedder.embed(t.text)), t) for t in s.turns]
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [(t.role, t.text) for sim, t in scored[:k] if sim >= threshold]
+
+    # ---- per-user session history (for UI display only; never fed to the agent) ----
+    def list_user_sessions(self, user_id: str, limit: int = HISTORY_SESSIONS,
+                           exclude_session: str = "") -> list[dict]:
+        rows = []
+        for sid, s in self._sessions.items():
+            if s.user_id != user_id or sid == exclude_session or not s.turns:
+                continue
+            first = next((t for t in s.turns if t.role == "user"), s.turns[0])
+            rows.append({
+                "session_id": sid,
+                "title": (first.text[:60] + ("…" if len(first.text) > 60 else "")),
+                "started_at": s.turns[0].ts,
+                "turns": [(t.role, t.text) for t in s.turns],
+            })
+        rows.sort(key=lambda r: r["started_at"], reverse=True)
+        return rows[:limit]
+
+    # ---- turns + summarization cadence ----
+    def add_user(self, session_id: str, text: str, user_id: str = "") -> None:
+        s = self.get(session_id)
+        if user_id:
+            s.user_id = user_id
         s.turns.append(Turn("user", text))
         s.user_query_count += 1
 
-    def add_assistant(self, session_id: str, text: str) -> None:
-        self.get(session_id).turns.append(Turn("assistant", text))
+    def add_assistant(self, session_id: str, text: str, user_id: str = "") -> None:
+        s = self.get(session_id)
+        if user_id:
+            s.user_id = user_id
+        s.turns.append(Turn("assistant", text))
 
     def due_for_summary(self, session_id: str) -> bool:
         s = self.get(session_id)
