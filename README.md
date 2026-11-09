@@ -17,7 +17,7 @@ when the matching env vars are set.
 
 ```bash
 make install          # dev deps (the engine itself is stdlib-only)
-make test             # unit + end-to-end + tools + backends (36 tests)
+make test             # unit + e2e + tools + backends + auth/admin/llm (58 tests)
 make demo             # full pipeline over the sample corpus, offline
 make eval             # accuracy golden-set scorecard (Recall@k, citation integrity)
 make api              # run the API gateway at :8000 (dev auth: Bearer viewer|analyst|admin)
@@ -39,10 +39,12 @@ AI_Assistant/
 ├── libs/                              # the ENGINE (pure-stdlib core; shared by every service)
 │   ├── contracts/     models.py · errors.py          # dataclasses, AgentEvent, error taxonomy
 │   ├── authz/         rbac.py · policy.py · identity.py   # role matrix, PEP, dev/Keycloak auth
+│   ├── authclient/    keycloak_client.py             # UI-side token acquisition (SSO + password)
 │   ├── observability/ logging.py                      # structured JSON logs + correlation ids
-│   ├── llm/           provider.py · gateway.py        # provider iface + MockProvider + metering
-│   ├── rag/           chunking · embeddings · bm25 · vectorstore · hybrid · store · ingest
+│   ├── llm/           provider.py · gateway.py · config_store.py   # providers + metering + runtime LLM config
+│   ├── rag/           chunking · embeddings · bm25 · vectorstore(+pinecone) · hybrid · store · ingest
 │   ├── memory/        conversation.py · usage.py      # history, summary, cache, token budget
+│   ├── admin/         jobs.py · ingest_runner.py      # upload job store + staged indexing w/ progress
 │   └── orchestrator/  graph.py(+graph_langgraph) · ops · prompts · guardrails · tools
 │                       · mcp_client · mcp_data · tool_web · tool_docparser   # the brain + tools
 │
@@ -55,12 +57,13 @@ AI_Assistant/
 │   ├── ai-tool-service/    app/main.py · server.py   # REST /call + REAL MCP server (FastMCP/MCPServer, stdio)
 │   ├── ai-conversation-service/ app/main.py   # /context · /usage/check · /usage/record
 │   ├── ai-model-gateway/   app/main.py        # /complete (routing + fallback + metering)
-│   ├── ai-admin-service/   app/main.py · eval/run_eval.py   # doc mgmt + accuracy harness
-│   ├── ui-public/          app.py             # Streamlit chat + activity panel
-│   └── ui-admin/           app.py             # Streamlit admin console
+│   ├── ai-admin-service/   app/main.py · eval/run_eval.py   # doc upload+progress, LLM config, eval (admin-only)
+│   ├── ui-public/          app.py             # Streamlit chat + SSO/staff login + activity panel
+│   └── ui-admin/           app.py             # Streamlit admin console (login, upload+progress, LLM config)
 │
+├── infra/keycloak/abc-bank-realm.json   # realm-as-code: clients, roles, SSO broker, seeded staff
 ├── scripts/demo.py                   # end-to-end offline demo
-├── tests/                            # unit · end_to_end · langgraph · tools · backends (36 tests)
+├── tests/                            # unit · e2e · langgraph · tools · backends · authclient · admin · llm-config (58 tests)
 ├── fixtures/sample_docs/ + golden.jsonl   # small corpus + golden set for tests/eval
 │
 ├── docs/   00–15 design docs + adr/ADR-001…010   (architecture, RAG, security, token budget, eval)
@@ -86,7 +89,8 @@ AI_Assistant/
 | **Token budget** (pre-check + post-call metering), rate limiting, memory + summarize-after-10 + semantic cache | ✅ real, tested |
 | LLM | **MockProvider** (deterministic, extractive, cited) offline; **Gemini / Anthropic / OpenAI** adapters hook in via `LLM_PROVIDER` + key (see "Connecting a real LLM") |
 | Vector DB | **in-memory** cosine index offline; **real Pinecone adapter** (`vectorstore_pinecone.py`, lazy index creation + namespaces, same interface) activates via `PINECONE_API_KEY` |
-| Auth | **dev users** (viewer/analyst/admin) offline; **real Keycloak OIDC** (`AUTH_MODE=keycloak`) — JWKS-verified JWT, cached keys, realm + client role mapping |
+| Auth | **dev users** (viewer/analyst/admin) offline; **real Keycloak OIDC** (`AUTH_MODE=keycloak`) — realm-as-code, **SSO identity brokering → Viewer** for public users, **username/password** for staff (admin/analyst), JWKS-verified JWT, realm + client role mapping |
+| Admin console | **document upload** (pdf/docx/xlsx/md/txt/html) with **live indexing progress**, and **runtime LLM configuration** (create-only; API keys write-only, never shown or returned) — Administrator-only |
 | Redis / Postgres | optional; in-memory fallbacks offline |
 
 ## Connecting a real LLM (e.g. Gemini)
@@ -136,22 +140,61 @@ using the live embedding dimension — so it works with the offline 256-dim hash
 (id tracking, with a metadata-filter fallback for pod indexes). Pair it with
 `EMBEDDING_PROVIDER=openai` for production-grade recall.
 
-## Connecting real auth (Keycloak / OIDC)
+## Authentication — two login models (Keycloak)
+
+The `abc-bank` realm is provisioned **as code** (`infra/keycloak/abc-bank-realm.json`) and
+auto-imported on `docker compose up`. Two distinct login paths, by design:
+
+- **Public users → SSO (identity brokering) → Viewer.** The public chat UI's *"Continue with
+  SSO"* sends the user straight to the corporate IdP through Keycloak (`kc_idp_hint`), using
+  Authorization-Code + PKCE. A first-login identity-provider mapper grants the **Viewer** role,
+  so external users get read-only access and nothing more. (Activate the broker by setting the
+  `SSO_*` client creds; without them, staff sign-in still works for the demo.)
+- **Staff (admin / analyst) → username / password.** Both UIs offer a credential form that uses
+  the OIDC Resource-Owner Password grant against the `ai-assistant-admin` client. Seeded demo
+  users: `admin / Admin#12345` (Administrator), `analyst / Analyst#12345` (Analyst).
 
 ```bash
 export AUTH_MODE=keycloak
-export KEYCLOAK_URL=https://sso.example.com
+export KEYCLOAK_URL=http://host.docker.internal:8080   # stable issuer for browser + containers
 export KEYCLOAK_REALM=abc-bank
-export KEYCLOAK_CLIENT_ID=ai-assistant      # client roles read from resource_access[this]
-export KEYCLOAK_VERIFY_AUD=false            # Keycloak often uses azp, not aud (default off)
+export KEYCLOAK_WEB_CLIENT_ID=ai-assistant-web          # public SSO client (auth-code + PKCE)
+export KEYCLOAK_ADMIN_CLIENT_ID=ai-assistant-admin      # staff client (password grant)
+export KEYCLOAK_SSO_IDP=corporate-sso                   # brokered IdP alias
+export KEYCLOAK_VERIFY_AUD=false
 # optional: map your IdP's role names onto the app's three roles
 export KEYCLOAK_ROLE_MAP="kc-reader:Viewer,kc-analyst:Analyst,kc-admin:Administrator"
 ```
 
-The gateway (`ai-assistant-api`) then validates each bearer JWT against the realm's JWKS
-(fetched once and cached, refreshed on key rotation), checks the issuer, and maps **realm
-roles + client roles** onto Viewer / Analyst / Administrator — the same roles the PEP and
-RBAC matrix enforce. No app-code change; dev mode (`AUTH_MODE=dev`) still works offline.
+The API side only **validates** tokens: it checks each bearer JWT against the realm JWKS
+(cached, rotation-safe), verifies the issuer, and maps **realm + client roles** onto
+Viewer/Analyst/Administrator — the same roles the PEP and RBAC matrix enforce. The UIs
+**acquire** tokens via `libs/authclient`. Dev mode (`AUTH_MODE=dev`) still works offline with
+the viewer/analyst/admin shortcuts. **Networking note:** both the browser (SSO redirect) and the
+containers (token/JWKS calls) use `http://host.docker.internal:8080`, and Keycloak pins that as
+its issuer (`KC_HOSTNAME_URL`), so the issuer is identical on both sides — the one thing to
+verify live on `docker compose up`. On a **Linux** host (not Docker Desktop) the browser also
+needs a hosts entry — `127.0.0.1 host.docker.internal` in `/etc/hosts` — for the SSO redirect;
+staff password login is server-side and unaffected. The brokered `corporate-sso` IdP ships with
+`REPLACE_WITH_*` placeholders in the realm file — set real IdP client creds there (or in the
+Keycloak admin console) to activate public SSO; staff sign-in works without it.
+
+## Admin console
+
+Administrator-only (`services/ui-admin`, `ai-admin-service`):
+
+- **Document upload + live indexing progress.** Upload a PDF, Word, Excel, Markdown, HTML or
+  text file; it's parsed, chunked and indexed in a background job, and the UI shows a progress
+  bar advancing through *extracting → chunking → indexing → done* (polling `/admin/jobs/{id}`).
+  Offline, the admin service and the chat API share the index through a file snapshot
+  (`INDEX_PATH` on the `kbindex` volume), so a freshly uploaded document is immediately
+  searchable in chat; with Pinecone configured, that shared store is used instead.
+- **Runtime LLM configuration.** Create an LLM config (provider + model slugs + API key) and
+  activate it live — the model gateway rebuilds to use it. **Create-only** (no edit after
+  creation) and the **API key is write-only**: it's accepted once, stored server-side, and
+  **never returned by any endpoint or shown in the UI** (list/response carry only a
+  `has_secret` flag). Secrets live in a gitignored server-only file for the POC; back it with a
+  secrets manager (Vault/KMS) in production — see `docs/adr/ADR-011`.
 
 ## Enabling LangSmith tracing
 
@@ -166,7 +209,7 @@ demo video, deliverable D4). Unset, everything runs identically with tracing off
 
 ## Validation (architect ⇄ evaluator loop)
 
-`make test` → **36 passing** (1 env-dependent skip). `make eval` on the golden set → **Recall@k = 1.0, citation
+`make test` → **58 passing** (1 env-dependent skip). `make eval` on the golden set → **Recall@k = 1.0, citation
 integrity = 1.0**. The loop caught and fixed a real retrieval-precision bug (date/ID queries
 ranked the wrong incident until document metadata was indexed with each chunk).
 

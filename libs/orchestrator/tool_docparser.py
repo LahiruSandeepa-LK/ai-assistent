@@ -35,6 +35,21 @@ def extract_text(source: str, filename: str = "") -> tuple[str, str]:
                 return ("\n".join(p.text for p in docx.Document(path).paragraphs), "docx")
             except Exception:
                 return ("[docx parsing requires the 'python-docx' package]", "docx")
+        if name.endswith((".xlsx", ".xlsm", ".xltx")):
+            try:  # optional
+                from openpyxl import load_workbook  # type: ignore
+
+                wb = load_workbook(path, read_only=True, data_only=True)
+                lines: list[str] = []
+                for ws in wb.worksheets:
+                    lines.append(f"## Sheet: {ws.title}")
+                    for row in ws.iter_rows(values_only=True):
+                        cells = [str(c) for c in row if c is not None]
+                        if cells:
+                            lines.append(" | ".join(cells))
+                return ("\n".join(lines), "xlsx")
+            except Exception:
+                return ("[xlsx parsing requires the 'openpyxl' package]", "xlsx")
         with open(path, encoding="utf-8", errors="ignore") as f:
             raw = f.read()
     else:

@@ -37,12 +37,32 @@ class ModelGateway:
 
 
 _GATEWAY: ModelGateway | None = None
+_GATEWAY_CFG_VERSION: int = -1
+
+
+def _config_version() -> int:
+    try:
+        from .config_store import get_config_store
+
+        return get_config_store().version
+    except Exception:
+        return 0
 
 
 def get_gateway() -> ModelGateway:
-    global _GATEWAY
-    if _GATEWAY is None:
+    """Return the process gateway, rebuilding it if the admin LLM config changed since it was
+    built (so activating a new provider in the admin console takes effect live)."""
+    global _GATEWAY, _GATEWAY_CFG_VERSION
+    ver = _config_version()
+    if _GATEWAY is None or ver != _GATEWAY_CFG_VERSION:
         # LLM_FALLBACK (e.g. "openai") gives provider resilience per ADR-003/E1.
         fallback = build_provider(os.getenv("LLM_FALLBACK", ""))
         _GATEWAY = ModelGateway(fallback=fallback)
+        _GATEWAY_CFG_VERSION = ver
     return _GATEWAY
+
+
+def reset_gateway() -> None:
+    """Force the next get_gateway() to rebuild (e.g. right after an LLM config activate)."""
+    global _GATEWAY
+    _GATEWAY = None

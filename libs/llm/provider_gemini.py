@@ -23,14 +23,22 @@ class GeminiProvider(BaseProvider):
     is_mock = False
     name = "gemini"
 
-    def __init__(self):
+    def __init__(self, api_key: str | None = None, model_strong: str | None = None,
+                 model_fast: str | None = None, base_url: str | None = None):
+        # base_url accepted for a uniform build signature; the google-genai SDK targets Google's
+        # endpoint, so it is intentionally ignored here.
         from google import genai  # pip install google-genai
 
+        key = api_key or os.environ["GEMINI_API_KEY"]
         self._genai = genai
-        self._client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+        self._client = genai.Client(api_key=key)
+        self._models = {
+            "strong": model_strong or _MODELS["strong"],
+            "fast": model_fast or _MODELS["fast"],
+        }
 
     def complete(self, system: str, user: str, *, model: str = "strong") -> Completion:
-        model_id = _MODELS.get(model, _MODELS["strong"])
+        model_id = self._models.get(model, self._models["strong"])
         types = self._genai.types
         cfg_kwargs = dict(system_instruction=system, temperature=0.2)
         # Gemini 3.x "thinks" by default, which adds latency. Cap it for low-latency grounded

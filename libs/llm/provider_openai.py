@@ -15,14 +15,20 @@ class OpenAIProvider(BaseProvider):
     is_mock = False
     name = "openai"
 
-    def __init__(self):
+    def __init__(self, api_key: str | None = None, model_strong: str | None = None,
+                 model_fast: str | None = None, base_url: str | None = None):
         from openai import OpenAI  # pip install openai
 
-        self._client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+        kw = {"api_key": api_key or os.environ["OPENAI_API_KEY"]}
+        if base_url or os.getenv("OPENAI_BASE_URL"):
+            kw["base_url"] = base_url or os.getenv("OPENAI_BASE_URL")
+        self._client = OpenAI(**kw)
+        self._models = {"strong": model_strong or _MODELS["strong"],
+                        "fast": model_fast or _MODELS["fast"]}
 
     def complete(self, system: str, user: str, *, model: str = "strong") -> Completion:
         r = self._client.chat.completions.create(
-            model=_MODELS.get(model, _MODELS["strong"]),
+            model=self._models.get(model, self._models["strong"]),
             messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
             temperature=0.2,
         )

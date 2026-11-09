@@ -2,3 +2,8 @@ fastapi
 uvicorn[standard]
 pydantic
 httpx
+python-multipart
+python-jose[cryptography]
+pypdf
+python-docx
+openpyxl

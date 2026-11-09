@@ -3,6 +3,8 @@ vector store together. Backs ai-knowledge-service. docs/04, docs/13."""
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 from typing import Any
 
 from contracts.models import Chunk, RetrievalRequest, RetrievalResult, Source
@@ -20,9 +22,19 @@ class KnowledgeIndex:
         self.vectors = get_vector_store()
         self.bm25 = BM25()
         self._dirty = True
+        # Cross-process sharing for the offline (in-memory) store: when INDEX_PATH is set, the
+        # chunk set is snapshotted to a shared file so a doc uploaded by ai-admin-service becomes
+        # searchable by the chat process (ai-assistant-api). Pinecone is already shared, so file
+        # persistence only applies to the in-memory store. docs/04 §3.
+        self._path = os.getenv("INDEX_PATH", "")
+        self._shared = bool(self._path) and isinstance(self.vectors, InMemoryVectorStore)
+        self._mtime = 0.0
+        if self._shared:
+            self._load()
 
     # ---- write path ----
     def upsert_chunks(self, chunks: list[Chunk]) -> None:
+        self._maybe_reload()
         recs = []
         for c in chunks:
             self.chunks[c.chunk_id] = c
@@ -35,13 +47,65 @@ class KnowledgeIndex:
             )
         self.vectors.upsert(recs)
         self._dirty = True
+        self._save()
 
     def delete_doc(self, doc_id: str) -> int:
+        self._maybe_reload()
         n = self.vectors.delete(doc_id)
         for cid in [cid for cid, c in self.chunks.items() if c.source.doc_id == doc_id]:
             del self.chunks[cid]
         self._dirty = True
+        self._save()
         return n
+
+    # ---- shared-file persistence (offline cross-process index) ----
+    def _save(self) -> None:
+        if not self._shared:
+            return
+        rows = [{"chunk_id": c.chunk_id, "text": c.text, "doc_id": c.source.doc_id,
+                 "title": c.source.title, "section": c.source.section, "url": c.source.url,
+                 "metadata": c.metadata} for c in self.chunks.values()]
+        os.makedirs(os.path.dirname(self._path), exist_ok=True)
+        tmp = self._path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"chunks": rows}, f)
+        os.replace(tmp, self._path)
+        try:
+            self._mtime = os.path.getmtime(self._path)
+        except OSError:
+            pass
+
+    def _maybe_reload(self) -> None:
+        if not self._shared:
+            return
+        try:
+            mtime = os.path.getmtime(self._path)
+        except OSError:
+            return
+        if mtime != self._mtime:
+            self._load()
+
+    def _load(self) -> None:
+        try:
+            with open(self._path, encoding="utf-8") as f:
+                payload = json.load(f)
+            self._mtime = os.path.getmtime(self._path)
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return
+        # rebuild chunks + vectors from the snapshot (vectors re-embedded; bm25 refits lazily)
+        self.chunks = {}
+        self.vectors = InMemoryVectorStore()
+        recs = []
+        for r in payload.get("chunks", []):
+            c = Chunk(chunk_id=r["chunk_id"], text=r["text"],
+                      source=Source(doc_id=r["doc_id"], title=r.get("title", ""),
+                                    section=r.get("section", ""), url=r.get("url", "")),
+                      metadata=r.get("metadata", {}))
+            self.chunks[c.chunk_id] = c
+            recs.append(VectorRecord(chunk_id=c.chunk_id, vector=self.embedder.embed(c.text),
+                                     payload={"doc_id": c.source.doc_id, **c.metadata}))
+        self.vectors.upsert(recs)
+        self._dirty = True
 
     def _refit_bm25(self) -> None:
         if self._dirty:
@@ -50,6 +114,7 @@ class KnowledgeIndex:
 
     # ---- read path ----
     async def search(self, req: RetrievalRequest) -> RetrievalResult:
+        self._maybe_reload()
         self._refit_bm25()
 
         async def _dense():

@@ -1,0 +1,86 @@
+{
+  "realm": "abc-bank",
+  "enabled": true,
+  "displayName": "ABC Bank (fictional)",
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "roles": {
+    "realm": [
+      { "name": "Viewer", "description": "Read-only access to public knowledge (default for SSO users)" },
+      { "name": "Analyst", "description": "Internal knowledge + analysis tools" },
+      { "name": "Administrator", "description": "Full access incl. admin console" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "ai-assistant-web",
+      "name": "Public chat UI (SSO)",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": ["http://localhost:8501/*", "http://localhost:8501/"],
+      "webOrigins": ["+"],
+      "attributes": { "pkce.code.challenge.method": "S256" }
+    },
+    {
+      "clientId": "ai-assistant-admin",
+      "name": "Staff login (password grant: admin/analyst)",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": [],
+      "webOrigins": []
+    }
+  ],
+  "identityProviders": [
+    {
+      "alias": "corporate-sso",
+      "displayName": "Corporate SSO",
+      "providerId": "oidc",
+      "enabled": true,
+      "trustEmail": true,
+      "firstBrokerLoginFlowAlias": "first broker login",
+      "config": {
+        "clientId": "REPLACE_WITH_SSO_CLIENT_ID",
+        "clientSecret": "REPLACE_WITH_SSO_CLIENT_SECRET",
+        "authorizationUrl": "https://REPLACE_WITH_IDP/authorize",
+        "tokenUrl": "https://REPLACE_WITH_IDP/oauth/token",
+        "defaultScope": "openid profile email",
+        "syncMode": "IMPORT"
+      }
+    }
+  ],
+  "identityProviderMappers": [
+    {
+      "name": "sso-users-get-viewer",
+      "identityProviderAlias": "corporate-sso",
+      "identityProviderMapper": "oidc-hardcoded-role-idp-mapper",
+      "config": { "role": "Viewer", "syncMode": "INHERIT" }
+    }
+  ],
+  "users": [
+    {
+      "username": "admin",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "admin@abc-bank.example",
+      "firstName": "Ava",
+      "lastName": "Admin",
+      "credentials": [{ "type": "password", "value": "Admin#12345", "temporary": false }],
+      "realmRoles": ["Administrator", "Analyst", "Viewer"]
+    },
+    {
+      "username": "analyst",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "analyst@abc-bank.example",
+      "firstName": "Arjun",
+      "lastName": "Analyst",
+      "credentials": [{ "type": "password", "value": "Analyst#12345", "temporary": false }],
+      "realmRoles": ["Analyst", "Viewer"]
+    }
+  ]
+}

@@ -71,30 +71,59 @@ class MockProvider(BaseProvider):
         return "Summary: " + " ".join(words[:50]) + ("…" if len(words) > 50 else "")
 
 
-def build_provider(name: str) -> BaseProvider | None:
-    """Construct a named real provider, or None if its SDK/key is unavailable."""
+def build_provider(name: str, *, api_key: str | None = None, model_strong: str | None = None,
+                   model_fast: str | None = None, base_url: str | None = None) -> BaseProvider | None:
+    """Construct a named real provider, or None if its SDK/key is unavailable.
+
+    `api_key`/`model_*`/`base_url` let the runtime config store (admin console) inject
+    credentials, model slugs and a custom endpoint directly; when omitted each adapter falls back
+    to its env vars. `base_url` is honoured by the OpenAI/Anthropic adapters (OpenAI-compatible
+    gateways); Gemini/mock ignore it."""
     name = (name or "").lower()
+    kw = {"api_key": api_key, "model_strong": model_strong, "model_fast": model_fast,
+          "base_url": base_url}
     try:  # pragma: no cover - exercised only when SDK + key are present
-        if name == "gemini" and os.getenv("GEMINI_API_KEY"):
+        if name == "gemini" and (api_key or os.getenv("GEMINI_API_KEY")):
             from .provider_gemini import GeminiProvider
 
-            return GeminiProvider()
-        if name == "anthropic" and os.getenv("ANTHROPIC_API_KEY"):
+            return GeminiProvider(**kw)
+        if name == "anthropic" and (api_key or os.getenv("ANTHROPIC_API_KEY")):
             from .provider_anthropic import AnthropicProvider
 
-            return AnthropicProvider()
-        if name == "openai" and os.getenv("OPENAI_API_KEY"):
+            return AnthropicProvider(**kw)
+        if name == "openai" and (api_key or os.getenv("OPENAI_API_KEY")):
             from .provider_openai import OpenAIProvider
 
-            return OpenAIProvider()
+            return OpenAIProvider(**kw)
     except Exception:
         return None
     return None
 
 
+def _provider_from_config() -> BaseProvider | None:
+    """If an admin created+activated an LLM config, build that provider from it (secret is read
+    in-process via the store, never crossing the API boundary)."""
+    try:
+        from .config_store import get_config_store
+
+        cfg = get_config_store().get_active()
+        if not cfg or cfg.provider == "mock":
+            return None if not cfg else MockProvider()
+        secret = get_config_store().secret_for(cfg.id)
+        return build_provider(cfg.provider, api_key=secret or None,
+                              model_strong=cfg.model_strong or None,
+                              model_fast=cfg.model_fast or None,
+                              base_url=cfg.base_url or None)
+    except Exception:
+        return None
+
+
 def get_provider() -> BaseProvider:
-    """Return the configured provider; MockProvider offline. Set LLM_PROVIDER to
-    gemini | anthropic | openai | mock (plus the matching API key)."""
+    """Return the configured provider. Precedence: active admin LLM config > LLM_PROVIDER env >
+    MockProvider (offline default)."""
+    from_cfg = _provider_from_config()
+    if from_cfg is not None:
+        return from_cfg
     provider = os.getenv("LLM_PROVIDER", "mock").lower()
     if provider in ("", "mock", "none"):
         return MockProvider()

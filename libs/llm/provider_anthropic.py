@@ -15,14 +15,20 @@ class AnthropicProvider(BaseProvider):
     is_mock = False
     name = "anthropic"
 
-    def __init__(self):
+    def __init__(self, api_key: str | None = None, model_strong: str | None = None,
+                 model_fast: str | None = None, base_url: str | None = None):
         import anthropic  # pip install anthropic
 
-        self._client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        kw = {"api_key": api_key or os.environ["ANTHROPIC_API_KEY"]}
+        if base_url or os.getenv("ANTHROPIC_BASE_URL"):
+            kw["base_url"] = base_url or os.getenv("ANTHROPIC_BASE_URL")
+        self._client = anthropic.Anthropic(**kw)
+        self._models = {"strong": model_strong or _MODELS["strong"],
+                        "fast": model_fast or _MODELS["fast"]}
 
     def complete(self, system: str, user: str, *, model: str = "strong") -> Completion:
         msg = self._client.messages.create(
-            model=_MODELS.get(model, _MODELS["strong"]),
+            model=self._models.get(model, self._models["strong"]),
             max_tokens=1024,
             system=system,
             messages=[{"role": "user", "content": user}],
