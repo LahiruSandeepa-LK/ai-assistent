@@ -105,3 +105,21 @@ def test_citation_integrity():
 def test_secret_redaction():
     out = guardrails.redact_secrets("key sk-abcdef1234567890 here")
     assert "sk-abcdefed" not in out and "[redacted]" in out
+
+
+def test_scope_guardrail_allows_banking_questions():
+    for q in ("What is the interest rate on a personal loan?",
+              "How do I open a savings account?",
+              "What are today's exchange rates?",
+              "tell me about fixed deposits"):
+        ok, _ = guardrails.in_scope(q)
+        assert ok, q
+
+
+def test_scope_guardrail_rejects_off_domain_questions():
+    for q in ("Write me a poem about the ocean",
+              "What is the capital of France?",
+              "Can you help me debug my Python code?",
+              "Who won the football match yesterday?"):
+        ok, reason = guardrails.in_scope(q)
+        assert not ok and reason == "out_of_scope", q

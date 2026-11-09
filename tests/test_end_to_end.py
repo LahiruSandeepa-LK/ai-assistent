@@ -38,6 +38,14 @@ def test_research_aggregates_multiple_incidents():
     assert len(ids) >= 2  # pulled from multiple incidents
 
 
+def test_out_of_scope_rejected_before_llm():
+    viewer = UserContext(user_id="v", roles=["Viewer"], session_id="t_scope")
+    ans = _run(viewer, "Write me a poem about the ocean")
+    assert ans.route == "out_of_scope"
+    assert not ans.citations            # never retrieved or called the LLM
+    assert "ABC Bank" in ans.text       # polite, on-brand rejection
+
+
 def test_access_filter_blocks_restricted_for_viewer():
     viewer = UserContext(user_id="v", roles=["Viewer"], session_id="t3")
     ans = _run(viewer, "Show the restricted customer data handling rules.")

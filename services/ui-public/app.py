@@ -206,7 +206,7 @@ def _chat_view():
             t = c.get("title") or ""
             if t and t not in titles:
                 titles.append(t)
-        if titles and data.get("route") not in ("greeting", "context", "blocked"):
+        if titles and data.get("route") not in ("greeting", "context", "blocked", "out_of_scope"):
             st.caption("Sources: " + " · ".join(titles[:3]))
 
     st.session_state.history.append({"role": "assistant", "content": answer})

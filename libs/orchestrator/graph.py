@@ -75,6 +75,20 @@ async def run(user: UserContext, message: str, emit: Emit = None) -> Answer:
         ops.emit(emit, "final", answer=ans.text, route="greeting")
         return ans
 
+    # topical scope rail: reject out-of-domain (non-banking) questions BEFORE the LLM/retrieval.
+    # In-session follow-ups ("what did you say earlier?") reference prior turns, so they bypass it.
+    low = message.lower()
+    bundle = conv.context_bundle(sid)
+    is_followup = any(h in low for h in ops.CONTEXT_HINTS) and bool(bundle.get("recent_turns"))
+    if not is_followup:
+        in_scope, _why = guardrails.in_scope(message)
+        if not in_scope:
+            ops.emit(emit, "validation", verdict="out_of_scope", reason="off-domain question")
+            ans = Answer(text=ops.OUT_OF_SCOPE_REPLY, route="out_of_scope")
+            conv.add_assistant(sid, ans.text, user.user_id)
+            ops.emit(emit, "final", answer=ans.text, route="out_of_scope")
+            return ans
+
     # router: semantic cache
     ops.emit(emit, "node", node="router")
     cached = conv.cache_lookup(sid, message)

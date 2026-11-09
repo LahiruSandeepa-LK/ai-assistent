@@ -29,6 +29,10 @@ GREETINGS = ("hi", "hello", "hey", "hiya", "good morning", "good afternoon", "go
 GREETING_REPLY = ("Hello! I'm ABC Bank's assistant. I can help you with loans, savings and fixed "
                   "deposits, cards, accounts, exchange rates and remittances, and account-opening "
                   "steps. What would you like to know?")
+OUT_OF_SCOPE_REPLY = ("I'm ABC Bank's assistant, so I can only help with our banking products and "
+                      "services — loans, savings and fixed deposits, cards, accounts, exchange "
+                      "rates and remittances, and account-opening. Is there something along those "
+                      "lines I can help you with?")
 
 
 def is_greeting(message: str) -> bool:
