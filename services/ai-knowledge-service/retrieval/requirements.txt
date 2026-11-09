@@ -2,3 +2,4 @@ fastapi
 uvicorn[standard]
 pydantic
 pinecone            # optional: real vector DB (activates when PINECONE_API_KEY is set)
+openai            # optional: EMBEDDING_PROVIDER=openai

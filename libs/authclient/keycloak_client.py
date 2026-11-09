@@ -48,10 +48,14 @@ def new_pkce() -> tuple[str, str]:
 
 def sso_login_url(redirect_uri: str, *, code_challenge: str, state: str = "",
                   client_id: str | None = None, idp_hint: str | None = None) -> str:
-    """Build the Keycloak authorization URL. `idp_hint` (default $KEYCLOAK_SSO_IDP) jumps straight
-    to the brokered corporate IdP so the public user never sees the Keycloak login form."""
+    """Build the Keycloak authorization URL.
+
+    By default (no KEYCLOAK_SSO_IDP set) this sends the user to Keycloak's own login page — which
+    IS the SSO/OIDC provider — and the realm grants them Viewer by default. Only when
+    KEYCLOAK_SSO_IDP names a *configured* broker alias do we add kc_idp_hint to jump straight to a
+    brokered external IdP. This avoids redirecting to an unconfigured broker."""
     cid = client_id or os.getenv("KEYCLOAK_WEB_CLIENT_ID", "ai-assistant-web")
-    hint = idp_hint if idp_hint is not None else os.getenv("KEYCLOAK_SSO_IDP", "corporate-sso")
+    hint = idp_hint if idp_hint is not None else os.getenv("KEYCLOAK_SSO_IDP", "")
     params = {
         "client_id": cid,
         "response_type": "code",

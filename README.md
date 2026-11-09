@@ -17,7 +17,7 @@ when the matching env vars are set.
 
 ```bash
 make install          # dev deps (the engine itself is stdlib-only)
-make test             # unit + e2e + tools + backends + auth/admin/llm (58 tests)
+make test             # unit + e2e + tools + backends + auth/admin/llm + integration (65 tests)
 make demo             # full pipeline over the sample corpus, offline
 make eval             # accuracy golden-set scorecard (Recall@k, citation integrity)
 make api              # run the API gateway at :8000 (dev auth: Bearer viewer|analyst|admin)
@@ -42,8 +42,10 @@ AI_Assistant/
 │   ├── authclient/    keycloak_client.py             # UI-side token acquisition (SSO + password)
 │   ├── observability/ logging.py                      # structured JSON logs + correlation ids
 │   ├── llm/           provider.py · gateway.py · config_store.py   # providers + metering + runtime LLM config
-│   ├── rag/           chunking · embeddings · bm25 · vectorstore(+pinecone) · hybrid · store · ingest
-│   ├── memory/        conversation.py · usage.py      # history, summary, cache, token budget
+│   ├── rag/           chunking · embeddings(+openai) · bm25 · vectorstore(+pinecone/local) · hybrid · store · ingest
+│   ├── memory/        conversation.py · usage.py · redis_client.py   # history, cache, token budget (Redis-backed)
+│   ├── db/            engine.py · stores.py           # Postgres: history, jobs, doc registry (SQLAlchemy)
+│   ├── clients/       services.py                     # HTTP clients for true service-to-service calls
 │   ├── admin/         jobs.py · ingest_runner.py      # upload job store + staged indexing w/ progress
 │   └── orchestrator/  graph.py(+graph_langgraph) · ops · prompts · guardrails · tools
 │                       · mcp_client · mcp_data · tool_web · tool_docparser   # the brain + tools
@@ -63,7 +65,7 @@ AI_Assistant/
 │
 ├── infra/keycloak/abc-bank-realm.json   # realm-as-code: clients, roles, SSO broker, seeded staff
 ├── scripts/demo.py                   # end-to-end offline demo
-├── tests/                            # unit · e2e · langgraph · tools · backends · authclient · admin · llm-config (58 tests)
+├── tests/                            # unit · e2e · langgraph · tools · backends · auth · admin · llm-config · integration (65 tests)
 ├── fixtures/sample_docs/ + golden.jsonl   # small corpus + golden set for tests/eval
 │
 ├── docs/   00–15 design docs + adr/ADR-001…010   (architecture, RAG, security, token budget, eval)
@@ -88,10 +90,13 @@ AI_Assistant/
 | **Tools + agent tool-routing** — knowledge_search, **MCP** (real FastMCP/MCPServer over stdio; in-process fallback), **web_search** (Tavily when `TAVILY_API_KEY` set; offline stub otherwise), **document_parser** (md/html/txt stdlib; pdf/docx optional), python_analysis — router detects tool-intent, PEP-gated, traced | ✅ real, tested |
 | **Token budget** (pre-check + post-call metering), rate limiting, memory + summarize-after-10 + semantic cache | ✅ real, tested |
 | LLM | **MockProvider** (deterministic, extractive, cited) offline; **Gemini / Anthropic / OpenAI** adapters hook in via `LLM_PROVIDER` + key (see "Connecting a real LLM") |
-| Vector DB | **in-memory** cosine index offline; **real Pinecone adapter** (`vectorstore_pinecone.py`, lazy index creation + namespaces, same interface) activates via `PINECONE_API_KEY` |
-| Auth | **dev users** (viewer/analyst/admin) offline; **real Keycloak OIDC** (`AUTH_MODE=keycloak`) — realm-as-code, **SSO identity brokering → Viewer** for public users, **username/password** for staff (admin/analyst), JWKS-verified JWT, realm + client role mapping |
-| Admin console | **document upload** (pdf/docx/xlsx/md/txt/html) with **live indexing progress**, and **runtime LLM configuration** (create-only; API keys write-only, never shown or returned) — Administrator-only |
-| Redis / Postgres | optional; in-memory fallbacks offline |
+| Embeddings | hashing embedder offline; **real OpenAI embeddings** (`embeddings_openai.py`) via `EMBEDDING_PROVIDER=openai` |
+| Vector DB | in-memory cosine index offline; **real Pinecone** via `PINECONE_API_KEY` — managed cloud, or the **local emulator** in Docker (`docker-compose.pinecone.yml`, no account needed) |
+| Auth | dev users offline; **real Keycloak OIDC** (`AUTH_MODE=keycloak`) — realm-as-code, **SSO brokering → Viewer** (public), **username/password** (staff), JWKS-verified JWT, realm + client role mapping |
+| Admin console | **document upload** (pdf/docx/xlsx/md/txt/html) with **live indexing progress**, and **runtime LLM configuration** (create-only; API keys write-only) — Administrator-only |
+| **State — Redis** | in-memory offline; **real Redis** via `REDIS_URL` — token budget (atomic INCR), rate limiting (fixed-window), shared semantic cache | ✅ real, integration-tested |
+| **State — Postgres** | in-memory offline; **real Postgres** via `POSTGRES_DSN` — conversation history, rolling summaries, ingest jobs, document registry (SQLAlchemy) | ✅ real, integration-tested |
+| **Service-to-service** | in-process offline; **real HTTP** between services when `*_URL` set — API→orchestrator→{retrieval, tools, model-gateway, conversation} | ✅ real, integration-tested |
 
 ## Connecting a real LLM (e.g. Gemini)
 
@@ -145,11 +150,14 @@ using the live embedding dimension — so it works with the offline 256-dim hash
 The `abc-bank` realm is provisioned **as code** (`infra/keycloak/abc-bank-realm.json`) and
 auto-imported on `docker compose up`. Two distinct login paths, by design:
 
-- **Public users → SSO (identity brokering) → Viewer.** The public chat UI's *"Continue with
-  SSO"* sends the user straight to the corporate IdP through Keycloak (`kc_idp_hint`), using
-  Authorization-Code + PKCE. A first-login identity-provider mapper grants the **Viewer** role,
-  so external users get read-only access and nothing more. (Activate the broker by setting the
-  `SSO_*` client creds; without them, staff sign-in still works for the demo.)
+- **Public users → SSO → Viewer.** The public chat UI's *"Continue with SSO"* runs
+  Authorization-Code + PKCE against Keycloak (the realm's OIDC provider). By **default** it uses
+  Keycloak's own login page and the realm grants **Viewer** by default (self-registration is
+  enabled; seeded demo account `public / Public#12345`). To front this with a **real corporate
+  IdP** (identity brokering), fill the `corporate-sso` broker's creds in the realm and set
+  `KEYCLOAK_SSO_IDP=corporate-sso` — then the button jumps straight to that IdP and the
+  first-login mapper assigns Viewer. Leaving `KEYCLOAK_SSO_IDP` empty (the default) avoids
+  redirecting to an unconfigured broker.
 - **Staff (admin / analyst) → username / password.** Both UIs offer a credential form that uses
   the OIDC Resource-Owner Password grant against the `ai-assistant-admin` client. Seeded demo
   users: `admin / Admin#12345` (Administrator), `analyst / Analyst#12345` (Analyst).
@@ -207,9 +215,36 @@ With these set, the LangGraph node transitions auto-trace to LangSmith, the LLM 
 calls appear as spans, and each answer carries a shareable `trace` event with the run URL (for the
 demo video, deliverable D4). Unset, everything runs identically with tracing off.
 
+## Real backends & scaling (no mocks)
+
+Every external dependency has a real integration that activates by env var, with an offline
+fallback so the POC still runs with zero credentials. All of these are integration-tested against
+live servers.
+
+- **Redis** (`REDIS_URL`) — token budget uses atomic `INCRBY` with period-end expiry; API rate
+  limiting uses a shared fixed-window counter; the semantic cache is shared across replicas. Code:
+  `libs/memory/redis_client.py`, `usage.py`, `conversation.py`.
+- **Postgres** (`POSTGRES_DSN`) — conversation history, rolling summaries, ingest jobs and a
+  document registry persist via SQLAlchemy 2.0 (`libs/db/`). Any asyncpg/psycopg DSN is accepted
+  and driven with psycopg2.
+- **Service-to-service HTTP** — set the `*_URL` vars and the stack runs as true microservices:
+  `ai-assistant-api` → `ai-orchestrator` → {`ai-knowledge-retrieval` `/search`, `ai-tool-service`
+  `/call`, `ai-model-gateway` `/complete`, `ai-conversation-service`}. The same code runs
+  in-process (offline/tests) or over HTTP (compose) — `libs/clients/services.py`. Leaf services
+  clear their own `*_URL` so they never call themselves.
+- **Pinecone** — managed cloud via `PINECONE_API_KEY`, or the **official local emulator in
+  Docker** with no account: `docker compose -f docker-compose.yml -f docker-compose.pinecone.yml
+  up --build`. Adapter honours `PINECONE_HOST` for the emulator.
+- **OpenAI embeddings** — `EMBEDDING_PROVIDER=openai` swaps the offline hashing embedder for
+  `text-embedding-3-small` (`libs/rag/embeddings_openai.py`).
+
+`docker compose up` wires Redis, Postgres, Keycloak and the full HTTP topology together; the
+`docker-compose.pinecone.yml` override adds real Pinecone. See `docs/19-live-validation-runbook.md`
+for the step-by-step bring-up and what to verify.
+
 ## Validation (architect ⇄ evaluator loop)
 
-`make test` → **58 passing** (1 env-dependent skip). `make eval` on the golden set → **Recall@k = 1.0, citation
+`make test` → **62 passing** offline (3 env-dependent skips); **64** with Redis+Postgres live. `make eval` on the golden set → **Recall@k = 1.0, citation
 integrity = 1.0**. The loop caught and fixed a real retrieval-precision bug (date/ID queries
 ranked the wrong incident until document metadata was indexed with each chunk).
 

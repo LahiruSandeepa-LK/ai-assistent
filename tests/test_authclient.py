@@ -22,14 +22,23 @@ def test_pkce_verifier_and_challenge_differ():
     assert "=" not in v and "=" not in c  # url-safe, unpadded
 
 
-def test_sso_login_url_has_pkce_and_idp_hint():
+def test_sso_login_url_defaults_to_keycloak_login_no_broker(monkeypatch):
+    # default: no KEYCLOAK_SSO_IDP -> go to Keycloak's own login page, NO broker hint
+    monkeypatch.delenv("KEYCLOAK_SSO_IDP", raising=False)
     url = kc.sso_login_url("http://localhost:8501/", code_challenge="CHAL", state="xyz")
     q = dict(up.parse_qsl(up.urlparse(url).query))
     assert q["response_type"] == "code"
     assert q["code_challenge"] == "CHAL" and q["code_challenge_method"] == "S256"
-    assert q["kc_idp_hint"] == "corporate-sso"
+    assert "kc_idp_hint" not in q  # must NOT force an unconfigured broker
     assert q["client_id"] == "ai-assistant-web"
     assert q["redirect_uri"] == "http://localhost:8501/"
+
+
+def test_sso_login_url_adds_broker_hint_only_when_configured(monkeypatch):
+    monkeypatch.setenv("KEYCLOAK_SSO_IDP", "corporate-sso")
+    url = kc.sso_login_url("http://localhost:8501/", code_challenge="CHAL")
+    q = dict(up.parse_qsl(up.urlparse(url).query))
+    assert q["kc_idp_hint"] == "corporate-sso"
 
 
 def test_password_login_posts_password_grant(monkeypatch):

@@ -7,3 +7,6 @@ python-jose[cryptography]
 pypdf
 python-docx
 openpyxl
+redis
+sqlalchemy>=2.0
+psycopg2-binary

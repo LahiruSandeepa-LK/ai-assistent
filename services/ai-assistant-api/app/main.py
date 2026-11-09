@@ -33,6 +33,21 @@ _buckets: dict[str, tuple[float, float]] = {}  # user -> (tokens, last_ts)
 
 def _rate_ok(user: UserContext) -> bool:
     cap = _RATE.get(user.top_role, 20)
+    # Redis fixed-window counter (shared across replicas) when available.
+    try:
+        from memory.redis_client import get_redis
+
+        r = get_redis()
+        if r is not None:
+            window = int(time.time() // 60)
+            key = f"rl:{user.user_id}:{window}"
+            n = r.incr(key)
+            if n == 1:
+                r.expire(key, 60)
+            return n <= cap
+    except Exception:
+        pass
+    # in-memory token bucket fallback
     refill = cap / 60.0
     tokens, last = _buckets.get(user.user_id, (cap, time.time()))
     now = time.time()
@@ -110,6 +125,16 @@ async def chat(req: ChatRequest, authorization: str | None = Header(default=None
 
     if req.stream:
         return StreamingResponse(_stream(user, req.message, cid), media_type="text/event-stream")
+
+    # True service-to-service: delegate to the ai-orchestrator service over HTTP when configured;
+    # otherwise run the orchestrator in-process (offline/POC). Either way the gateway meters usage.
+    if os.getenv("ORCHESTRATOR_URL"):
+        from clients.services import remote_agent_run
+
+        data = await remote_agent_run(user, req.message)
+        data["usage"] = to_jsonable(get_usage_store().get(user.user_id, user.top_role))
+        data["correlation_id"] = cid
+        return data
 
     events: list[dict] = []
     ans = await run_graph(user, req.message, emit=lambda e: events.append(e.to_dict()))

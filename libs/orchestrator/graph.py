@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 from typing import Optional
 
-from contracts.models import AgentEvent, Answer, UserContext
+from contracts.models import AgentEvent, Answer, Citation, UserContext
 from memory.conversation import get_conversation_store
 from . import ops, guardrails
 
@@ -68,12 +68,21 @@ async def run(user: UserContext, message: str, emit: Emit = None) -> Answer:
         ops.emit(emit, "final", answer=ans.text, route=ans.route)
         return ans
 
+    # greeting / pleasantry: friendly welcome, no retrieval or LLM, no history dump
+    if ops.is_greeting(message):
+        ans = Answer(text=ops.GREETING_REPLY, route="greeting")
+        conv.add_assistant(sid, ans.text)
+        ops.emit(emit, "final", answer=ans.text, route="greeting")
+        return ans
+
     # router: semantic cache
     ops.emit(emit, "node", node="router")
     cached = conv.cache_lookup(sid, message)
     if cached:
         text, cites = cached
         ops.emit(emit, "node", node="cache", hit=True)
+        # cache stores citations as plain dicts (JSON-safe); rebuild Citation objects
+        cites = [Citation(**c) if isinstance(c, dict) else c for c in (cites or [])]
         ans = Answer(text=text, citations=cites, route="cache")
         conv.add_assistant(sid, ans.text)
         ops.emit(emit, "final", answer=ans.text, route="cache")

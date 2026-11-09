@@ -28,8 +28,13 @@ def _reset_at() -> str:
     return "next day (UTC)"
 
 
+def _period_ttl() -> int:
+    # seconds until the current budget window ends (used to expire Redis counters)
+    return 40 * 24 * 3600 if PERIOD == "monthly" else 2 * 24 * 3600
+
+
 class UsageStore:
-    """Token-budget accounting. Pluggable backend; in-memory default."""
+    """Token-budget accounting. In-memory default."""
 
     def __init__(self):
         self._used: dict[str, int] = {}
@@ -47,9 +52,35 @@ class UsageStore:
         return self.get(user_id, role)
 
     def record(self, user_id: str, tokens: int) -> None:
-        """Post-flight metering: atomically add actual tokens used."""
+        """Post-flight metering: add actual tokens used."""
         k = self._key(user_id)
         self._used[k] = self._used.get(k, 0) + max(0, int(tokens))
+
+
+class RedisUsageStore(UsageStore):
+    """Token budget backed by Redis — atomic INCRBY, shared across all service replicas, with the
+    counter auto-expiring at period end. Falls back to in-memory semantics on any Redis error."""
+
+    def __init__(self, client):
+        super().__init__()
+        self._r = client
+
+    def get(self, user_id: str, role: str) -> Usage:
+        limit = ROLE_LIMITS.get(role, ROLE_LIMITS["Viewer"])
+        try:
+            used = int(self._r.get(self._key(user_id)) or 0)
+        except Exception:
+            used = self._used.get(self._key(user_id), 0)
+        return Usage(user_id=user_id, limit=limit, used=used, reset_at=_reset_at())
+
+    def record(self, user_id: str, tokens: int) -> None:
+        k = self._key(user_id)
+        try:
+            new = self._r.incrby(k, max(0, int(tokens)))
+            if new == max(0, int(tokens)):   # first write this window -> set TTL
+                self._r.expire(k, _period_ttl())
+        except Exception:
+            super().record(user_id, tokens)
 
 
 _STORE: UsageStore | None = None
@@ -58,5 +89,13 @@ _STORE: UsageStore | None = None
 def get_usage_store() -> UsageStore:
     global _STORE
     if _STORE is None:
-        _STORE = UsageStore()
+        from .redis_client import get_redis
+
+        client = get_redis()
+        _STORE = RedisUsageStore(client) if client is not None else UsageStore()
     return _STORE
+
+
+def reset_usage_store() -> None:
+    global _STORE
+    _STORE = None

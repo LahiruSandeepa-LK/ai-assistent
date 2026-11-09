@@ -1,0 +1,38 @@
+# Real Pinecone via the official LOCAL emulator (no cloud account needed).
+# Enable with:  docker compose -f docker-compose.yml -f docker-compose.pinecone.yml up --build
+# This runs pinecone-local and points the index-using services at it, so retrieval/ingest use a
+# REAL Pinecone API (not the in-memory store). The default compose (offline) uses the in-memory
+# index + shared file; this override switches the stack to Pinecone. docs/04 §3, ADR-002.
+name: ai-assistant
+services:
+  pinecone-local:
+    image: ghcr.io/pinecone-io/pinecone-local:latest
+    environment:
+      PORT_RANGE: 5080-5090
+    ports:
+      - "5080-5090:5080-5090"
+
+  ai-knowledge-retrieval:
+    environment:
+      - PINECONE_API_KEY=pclocal
+      - PINECONE_HOST=http://pinecone-local:5080
+      - PINECONE_INDEX=ai-assistant
+    depends_on: [pinecone-local]
+  ai-knowledge-ingest:
+    environment:
+      - PINECONE_API_KEY=pclocal
+      - PINECONE_HOST=http://pinecone-local:5080
+      - PINECONE_INDEX=ai-assistant
+    depends_on: [pinecone-local, postgres]
+  ai-assistant-api:
+    environment:
+      - PINECONE_API_KEY=pclocal
+      - PINECONE_HOST=http://pinecone-local:5080
+      - PINECONE_INDEX=ai-assistant
+    depends_on: [pinecone-local]
+  ai-admin-service:
+    environment:
+      - PINECONE_API_KEY=pclocal
+      - PINECONE_HOST=http://pinecone-local:5080
+      - PINECONE_INDEX=ai-assistant
+    depends_on: [pinecone-local]

@@ -8,6 +8,22 @@ from dataclasses import dataclass, field
 
 from rag.embeddings import HashingEmbedder, cosine
 
+
+def _jsonable_citations(citations: list) -> list:
+    """Normalise citations to a list of plain dicts so the semantic cache is JSON-serialisable
+    (Redis) and identical across the in-memory and Redis paths."""
+    out = []
+    for c in citations or []:
+        if isinstance(c, dict):
+            out.append(c)
+        elif hasattr(c, "__dataclass_fields__"):
+            from dataclasses import asdict
+            out.append(asdict(c))
+        else:
+            out.append({"doc_id": str(c)})
+    return out
+
+
 VERBATIM_TURNS = int(os.getenv("VERBATIM_TURNS", "6"))
 SUMMARIZE_EVERY = int(os.getenv("SUMMARIZE_EVERY_N_TURNS", "10"))
 CACHE_THRESHOLD = float(os.getenv("SEMANTIC_CACHE_THRESHOLD", "0.95"))
@@ -49,12 +65,29 @@ class ConversationStore:
             "recent_turns": [(t.role, t.text) for t in self.recent_turns(session_id)],
         }
 
-    # ---- cache ----
+    # ---- semantic cache (Redis when available for cross-replica sharing; else in-memory) ----
+    def _cache_entries(self, session_id: str):
+        try:
+            from .redis_client import get_redis
+
+            r = get_redis()
+            if r is not None:
+                import json
+
+                out = []
+                for raw in r.lrange(f"cache:{session_id}", 0, -1):
+                    d = json.loads(raw)
+                    out.append((d["v"], d["a"], d["c"]))
+                return out
+        except Exception:
+            pass
+        return self._cache.get(session_id, [])
+
     def cache_lookup(self, session_id: str, query: str):
         qv = self._embedder.embed(query)
         best = None
         best_sim = 0.0
-        for vec, answer, citations in self._cache.get(session_id, []):
+        for vec, answer, citations in self._cache_entries(session_id):
             sim = cosine(qv, vec)
             if sim > best_sim:
                 best_sim, best = sim, (answer, citations)
@@ -63,7 +96,21 @@ class ConversationStore:
         return None
 
     def cache_store(self, session_id: str, query: str, answer: str, citations: list) -> None:
-        self._cache.setdefault(session_id, []).append((self._embedder.embed(query), answer, citations))
+        vec = self._embedder.embed(query)
+        cites = _jsonable_citations(citations)  # store JSON-safe in BOTH paths for consistency
+        try:
+            from .redis_client import get_redis
+
+            r = get_redis()
+            if r is not None:
+                import json
+
+                r.rpush(f"cache:{session_id}", json.dumps({"v": vec, "a": answer, "c": cites}))
+                r.expire(f"cache:{session_id}", 7 * 24 * 3600)
+                return
+        except Exception:
+            pass
+        self._cache.setdefault(session_id, []).append((vec, answer, cites))
 
     # ---- turns + summarization cadence ----
     def add_user(self, session_id: str, text: str) -> None:
@@ -94,5 +141,20 @@ _STORE: ConversationStore | None = None
 def get_conversation_store() -> ConversationStore:
     global _STORE
     if _STORE is None:
+        try:
+            from db.engine import pg_enabled
+
+            if pg_enabled():
+                from db.stores import PgConversationStore
+
+                _STORE = PgConversationStore()
+                return _STORE
+        except Exception:
+            pass  # fall back to in-memory on any DB/driver error
         _STORE = ConversationStore()
     return _STORE
+
+
+def reset_conversation_store() -> None:
+    global _STORE
+    _STORE = None

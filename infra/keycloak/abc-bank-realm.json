@@ -3,14 +3,21 @@
   "enabled": true,
   "displayName": "ABC Bank (fictional)",
   "sslRequired": "none",
-  "registrationAllowed": false,
+  "registrationAllowed": true,
   "loginWithEmailAllowed": true,
   "roles": {
     "realm": [
-      { "name": "Viewer", "description": "Read-only access to public knowledge (default for SSO users)" },
+      { "name": "Viewer", "description": "Read-only access to public knowledge (default for SSO/public users)" },
       { "name": "Analyst", "description": "Internal knowledge + analysis tools" },
       { "name": "Administrator", "description": "Full access incl. admin console" }
     ]
+  },
+  "defaultRole": {
+    "name": "default-roles-abc-bank",
+    "description": "${role_default-roles}",
+    "composite": true,
+    "clientRole": false,
+    "composites": { "realm": ["Viewer", "offline_access", "uma_authorization"] }
   },
   "clients": [
     {
@@ -81,6 +88,16 @@
       "lastName": "Analyst",
       "credentials": [{ "type": "password", "value": "Analyst#12345", "temporary": false }],
       "realmRoles": ["Analyst", "Viewer"]
+    },
+    {
+      "username": "public",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "public@abc-bank.example",
+      "firstName": "Pat",
+      "lastName": "Public",
+      "credentials": [{ "type": "password", "value": "Public#12345", "temporary": false }],
+      "realmRoles": ["Viewer"]
     }
   ]
 }

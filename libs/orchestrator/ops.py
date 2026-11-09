@@ -24,6 +24,18 @@ DOC_HINTS = ("parse this", "parse the document", "extract text", "read this pdf"
              "parse document", "parse the pdf")
 
 
+GREETINGS = ("hi", "hello", "hey", "hiya", "good morning", "good afternoon", "good evening",
+             "thanks", "thank you", "thankyou", "ok", "okay", "bye", "goodbye")
+GREETING_REPLY = ("Hello! I'm ABC Bank's assistant. I can help you with loans, savings and fixed "
+                  "deposits, cards, accounts, exchange rates and remittances, and account-opening "
+                  "steps. What would you like to know?")
+
+
+def is_greeting(message: str) -> bool:
+    low = message.strip().lower().rstrip("!.")
+    return low in GREETINGS or (len(low.split()) <= 3 and any(low.startswith(g) for g in GREETINGS))
+
+
 def is_tool_intent(message: str) -> bool:
     low = message.lower()
     return any(h in low for group in (WEB_HINTS, MCP_HINTS, DOC_HINTS) for h in group)
@@ -132,38 +144,53 @@ def merge_chunks(groups: list[list[Chunk]], limit: int = 8) -> list[Chunk]:
     return sorted(seen.values(), key=lambda c: c.score, reverse=True)[:limit]
 
 
+NO_ANSWER = ("I'm sorry, I don't have that information at the moment. I can help with ABC Bank "
+             "loans, deposits and fixed deposits, cards, accounts, exchange rates and remittances, "
+             "and account-opening steps — just ask.")
+
+
+def strip_markers(text: str) -> str:
+    """Remove internal [DOC_ID] citation markers and any leaked meta-commentary so the customer
+    sees a clean, natural answer."""
+    text = re.sub(r"\s*\[[A-Z0-9][A-Z0-9\-]*\]", "", text)
+    text = re.sub(r"(?im)^\s*\(?answer grounded[^\n]*\)?\s*$", "", text)
+    return re.sub(r"[ \t]{2,}", " ", text).strip()
+
+
 async def synthesize(user: UserContext, message: str, chunks: list[Chunk], cb: Emit = None, route: str = "retrieval") -> Answer:
     gw = get_gateway()
     if not chunks:
-        return Answer(
-            text="I couldn't find supporting evidence in the knowledge base, so I can't answer that confidently.",
-            route=route, degraded=True)
+        return Answer(text=NO_ANSWER, route=route, degraded=True)
     emit(cb, "node", node="response")
     ctx = format_context(chunks)
     comp = gw.complete(prompts.SYNTHESIZE, f"QUESTION: {message}\n\nCONTEXT:\n{ctx}", model="strong", user_id=user.user_id)
     text = guardrails.redact_secrets(comp.text)
 
+    # validate citations against retrieved context BEFORE stripping the markers
     ok_cite, hallucinated = guardrails.check_citations(text, chunks)
     grounded = guardrails.groundedness(text, chunks)
-    if not ok_cite:
-        for hid in hallucinated:
-            text = text.replace(f"[{hid}]", "")
     emit(cb, "validation", citations_ok=ok_cite, hallucinated=hallucinated, groundedness=round(grounded, 2))
 
-    cited = set(re.findall(r"\[([A-Z0-9\-]+)\]", text))
+    cited = set(re.findall(r"\[([A-Z0-9\-]+)\]", text)) - set(hallucinated)
     cites = [Citation(c.source.doc_id, c.source.title, c.source.section, c.source.url)
              for c in chunks if c.source.doc_id in cited] \
         or [Citation(c.source.doc_id, c.source.title, c.source.section, c.source.url) for c in chunks[:3]]
-    return Answer(text=text, citations=cites, route=route, reasoning=f"grounded={grounded:.2f}", tokens=comp.total_tokens)
+
+    # remove all internal markers/meta for the customer-facing text
+    display = strip_markers(text) or NO_ANSWER
+    return Answer(text=display, citations=cites, route=route, reasoning=f"grounded={grounded:.2f}", tokens=comp.total_tokens)
 
 
 async def context_answer(user: UserContext, message: str, bundle: dict, cb: Emit = None) -> Answer:
     gw = get_gateway()
     hist = "\n".join(f"{r}: {t}" for r, t in bundle.get("recent_turns", []))
     if not hist:
-        return Answer(text="Could you clarify what you'd like to know?", route="context")
-    c = gw.complete(prompts.SUMMARIZE, f"QUESTION: {message}\n\n{hist}", model="fast", user_id=user.user_id)
-    return Answer(text=guardrails.redact_secrets(c.text), route="context", tokens=c.total_tokens)
+        return Answer(text="Sure — what would you like to know about ABC Bank's products or services?",
+                      route="context")
+    c = gw.complete(prompts.CONTEXT, f"QUESTION: {message}\n\nCONVERSATION:\n{hist}",
+                    model="fast", user_id=user.user_id)
+    return Answer(text=strip_markers(guardrails.redact_secrets(c.text)), route="context",
+                  tokens=c.total_tokens)
 
 
 def maybe_summarize(user: UserContext, sid: str) -> None:

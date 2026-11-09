@@ -44,6 +44,16 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, default=str)
 
 
+class _ServiceAdapter(logging.LoggerAdapter):
+    """Merge the adapter's context (service) with each call's extra, instead of the default
+    LoggerAdapter behaviour of overwriting it — otherwise the per-call `fields` (documents,
+    chunks, route, …) are lost and never reach the JSON formatter."""
+
+    def process(self, msg, kwargs):
+        kwargs["extra"] = {**self.extra, **kwargs.get("extra", {})}
+        return msg, kwargs
+
+
 def get_logger(service: str = "ai-assistant") -> logging.LoggerAdapter:
     logger = logging.getLogger(service)
     if not logger.handlers:
@@ -52,7 +62,7 @@ def get_logger(service: str = "ai-assistant") -> logging.LoggerAdapter:
         logger.addHandler(h)
         logger.setLevel(logging.INFO)
         logger.propagate = False
-    return logging.LoggerAdapter(logger, {"service": service})
+    return _ServiceAdapter(logger, {"service": service})
 
 
 def log(logger, event: str, **fields) -> None:

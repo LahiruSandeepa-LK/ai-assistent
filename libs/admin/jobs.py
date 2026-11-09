@@ -78,5 +78,20 @@ _STORE: JobStore | None = None
 def get_job_store() -> JobStore:
     global _STORE
     if _STORE is None:
+        try:
+            from db.engine import pg_enabled
+
+            if pg_enabled():
+                from db.stores import PgJobStore
+
+                _STORE = PgJobStore()
+                return _STORE
+        except Exception:
+            pass  # fall back to in-memory on any DB/driver error
         _STORE = JobStore()
     return _STORE
+
+
+def reset_job_store() -> None:
+    global _STORE
+    _STORE = None

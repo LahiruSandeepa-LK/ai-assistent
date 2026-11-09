@@ -4,6 +4,7 @@ through the same grounded-synthesis + citation path. docs/03 §7, docs/06 §4, d
 from __future__ import annotations
 
 import json
+import os
 
 from contracts.models import Chunk, RetrievalRequest, RetrievalResult, Source, UserContext
 from authz.policy import enforce_tool
@@ -13,23 +14,42 @@ from observability.tracing import traced
 from . import mcp_client, mcp_data, tool_web, tool_docparser
 
 
+def _remote(env: str) -> bool:
+    return bool(os.getenv(env))
+
+
 @traced(name="tool.knowledge_search", run_type="retriever")
 async def knowledge_search(user: UserContext, query: str, *, top_k: int = 6, filters: dict | None = None) -> RetrievalResult:
     enforce_tool(user, "knowledge_search")
+    access = max_access_for(user.roles)
+    if _remote("KNOWLEDGE_RETRIEVAL_URL"):
+        from clients.services import remote_search
+
+        return await remote_search(query, top_k, filters or {}, access)
     req = RetrievalRequest(query=query, top_k=top_k, filters=filters or {}, rerank=True,
-                           access_level_max=max_access_for(user.roles))
+                           access_level_max=access)
     return await get_index().search(req)
 
 
 @traced(name="tool.web_search", run_type="tool")
 async def web_search(user: UserContext, query: str, *, k: int = 3) -> list[Chunk]:
     enforce_tool(user, "web_search")
+    if _remote("TOOL_SERVICE_URL"):
+        from clients.services import chunk_from_json, remote_tool_call
+
+        data = await remote_tool_call(user, "web_search", {"query": query})
+        return [chunk_from_json(x) for x in data.get("chunks", [])]
     return tool_web.search(query, k)
 
 
 @traced(name="tool.document_parser", run_type="tool")
 async def document_parser(user: UserContext, source: str, *, filename: str = "", doc_id: str = "PARSED") -> list[Chunk]:
     enforce_tool(user, "document_parser")
+    if _remote("TOOL_SERVICE_URL"):
+        from clients.services import chunk_from_json, remote_tool_call
+
+        data = await remote_tool_call(user, "document_parser", {"content": source, "filename": filename})
+        return [chunk_from_json(x) for x in data.get("chunks", [])]
     return tool_docparser.parse(source, filename=filename, doc_id=doc_id)
 
 
@@ -37,7 +57,13 @@ async def document_parser(user: UserContext, source: str, *, filename: str = "",
 async def mcp(user: UserContext, resource: str, query: str = "") -> list[Chunk]:
     """Call the MCP server (real over stdio when MCP_SERVER_CMD set; else in-process)."""
     enforce_tool(user, "mcp")
-    records = await mcp_client.call_tool(resource, {"query": query})
+    if _remote("TOOL_SERVICE_URL"):
+        from clients.services import remote_tool_call
+
+        data = await remote_tool_call(user, "mcp", {"resource": resource, "query": query})
+        records = data.get("records", [])
+    else:
+        records = await mcp_client.call_tool(resource, {"query": query})
     chunks: list[Chunk] = []
     for i, rec in enumerate(records):
         text = json.dumps(rec)

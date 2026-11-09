@@ -16,10 +16,14 @@ services:
       - KEYCLOAK_REALM=abc-bank
       - KEYCLOAK_WEB_CLIENT_ID=ai-assistant-web
       - KEYCLOAK_ADMIN_CLIENT_ID=ai-assistant-admin
-      - KEYCLOAK_SSO_IDP=corporate-sso
+      # Empty = SSO uses Keycloak's own login (grants Viewer). Set to a CONFIGURED broker alias
+      # (e.g. corporate-sso) only after filling real IdP creds in the realm — see docs/16.
+      - KEYCLOAK_SSO_IDP=
       - PUBLIC_BASE_URL=http://localhost:8501
     extra_hosts: ["host.docker.internal:host-gateway"]
-    depends_on: [ai-assistant-api, keycloak]
+    depends_on:
+      ai-assistant-api: { condition: service_started }
+      keycloak: { condition: service_healthy }
   ui-admin:
     build: { context: ., dockerfile: services/ui-admin/Dockerfile }
     ports: ["8502:8502"]
@@ -31,7 +35,9 @@ services:
       - KEYCLOAK_REALM=abc-bank
       - KEYCLOAK_ADMIN_CLIENT_ID=ai-assistant-admin
     extra_hosts: ["host.docker.internal:host-gateway"]
-    depends_on: [ai-admin-service, keycloak]
+    depends_on:
+      ai-admin-service: { condition: service_started }
+      keycloak: { condition: service_healthy }
   ai-assistant-api:
     build: { context: ., dockerfile: services/ai-assistant-api/Dockerfile }
     ports: ["8000:8000"]
@@ -45,12 +51,18 @@ services:
       - SAMPLE_DOCS=/corpus
       - LLM_CONFIG_PATH=/runtime/llm_config.json
       - INDEX_PATH=/kb/index.json
+      # true service-to-service: delegate the agent run to the orchestrator over HTTP
+      - ORCHESTRATOR_URL=http://ai-orchestrator:8100
     volumes:
       - "./services/ai-knowledge-service/ingestion/sample_docs:/corpus:ro"
       - "llmcfg:/runtime"
       - "kbindex:/kb"
     extra_hosts: ["host.docker.internal:host-gateway"]
-    depends_on: [ai-orchestrator, ai-conversation-service, redis, keycloak]
+    depends_on:
+      ai-orchestrator: { condition: service_started }
+      ai-conversation-service: { condition: service_started }
+      redis: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
   ai-orchestrator:
     build: { context: ., dockerfile: services/ai-orchestrator/Dockerfile }
     expose: ["8100"]
@@ -58,6 +70,11 @@ services:
     environment:
       - LLM_CONFIG_PATH=/runtime/llm_config.json
       - INDEX_PATH=/kb/index.json
+      # true service-to-service: orchestrator calls the leaf services over HTTP
+      - KNOWLEDGE_RETRIEVAL_URL=http://ai-knowledge-retrieval:8200
+      - TOOL_SERVICE_URL=http://ai-tool-service:8300
+      - MODEL_GATEWAY_URL=http://ai-model-gateway:8700
+      - CONVERSATION_URL=http://ai-conversation-service:8600
     volumes:
       - "llmcfg:/runtime"
       - "kbindex:/kb"
@@ -66,7 +83,9 @@ services:
     build: { context: ., dockerfile: services/ai-knowledge-service/retrieval/Dockerfile }
     expose: ["8200"]
     env_file: .env
-    environment: ["INDEX_PATH=/kb/index.json"]
+    environment:
+      - INDEX_PATH=/kb/index.json
+      - KNOWLEDGE_RETRIEVAL_URL=   # leaf service: must not call itself
     volumes: ["kbindex:/kb"]
   ai-knowledge-ingest:
     build: { context: ., dockerfile: services/ai-knowledge-service/ingestion/Dockerfile }
@@ -74,24 +93,33 @@ services:
     env_file: .env
     environment: ["INDEX_PATH=/kb/index.json"]
     volumes: ["kbindex:/kb"]
-    depends_on: [postgres]
+    depends_on:
+      postgres: { condition: service_healthy }
   ai-tool-service:
     build: { context: ., dockerfile: services/ai-tool-service/Dockerfile }
     expose: ["8300"]
     env_file: .env
+    environment:
+      - TOOL_SERVICE_URL=       # leaf service: must not call itself
   ai-conversation-service:
     build: { context: ., dockerfile: services/ai-conversation-service/Dockerfile }
     expose: ["8600"]
     env_file: .env
-    depends_on: [redis, postgres]
+    environment:
+      - CONVERSATION_URL=       # leaf service: must not call itself
+    depends_on:
+      redis: { condition: service_healthy }
+      postgres: { condition: service_healthy }
   ai-model-gateway:
     build: { context: ., dockerfile: services/ai-model-gateway/Dockerfile }
     expose: ["8700"]
     env_file: .env
     environment:
       - LLM_CONFIG_PATH=/runtime/llm_config.json
+      - MODEL_GATEWAY_URL=      # leaf service: completes locally, never calls itself
     volumes: ["llmcfg:/runtime"]
-    depends_on: [redis]
+    depends_on:
+      redis: { condition: service_healthy }
   ai-admin-service:
     build: { context: ., dockerfile: services/ai-admin-service/Dockerfile }
     ports: ["8800:8800"]
@@ -107,7 +135,10 @@ services:
       - "llmcfg:/runtime"
       - "kbindex:/kb"
     extra_hosts: ["host.docker.internal:host-gateway"]
-    depends_on: [ai-knowledge-ingest, postgres, keycloak]
+    depends_on:
+      ai-knowledge-ingest: { condition: service_started }
+      postgres: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
   keycloak:
     image: quay.io/keycloak/keycloak:25.0
     command: ["start-dev", "--import-realm"]
@@ -122,14 +153,31 @@ services:
     extra_hosts: ["host.docker.internal:host-gateway"]
     volumes:
       - "./infra/keycloak:/opt/keycloak/data/import:ro"
+    healthcheck:
+      # HTTP/1.1 with a Host header — Keycloak's hostname-v2 provider NPEs on a missing authority.
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && printf 'GET /realms/abc-bank HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q abc-bank"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
   redis:
     image: redis:7
     expose: ["6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
   postgres:
     image: postgres:16
     environment: { POSTGRES_USER: app, POSTGRES_PASSWORD: app, POSTGRES_DB: app }
     expose: ["5432"]
     volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 volumes:
   pgdata:
   llmcfg:

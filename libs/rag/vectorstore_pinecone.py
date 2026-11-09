@@ -11,9 +11,12 @@ Design notes
 * delete(doc_id): Pinecone serverless does not support delete-by-metadata-filter, so we
   keep an in-process doc_id -> chunk_ids map (populated on upsert) and delete by id, with
   a metadata-filter delete as the fallback for pod indexes / cross-process deletes.
-* Env: PINECONE_API_KEY (required), PINECONE_INDEX (default "ai-assistant"),
-  PINECONE_NAMESPACE (default ""), PINECONE_CLOUD (default "aws"),
+* Env: PINECONE_API_KEY (required; "pclocal" for the local emulator), PINECONE_INDEX
+  (default "ai-assistant"), PINECONE_NAMESPACE (default ""), PINECONE_CLOUD (default "aws"),
   PINECONE_REGION (default "us-east-1").
+* Local emulator: set PINECONE_HOST to the Pinecone Local controller (e.g.
+  http://pinecone-local:5080). The adapter then connects to the emulator instead of the managed
+  cloud — real Pinecone API, no account needed. docs/04 §3, ADR-002.
 """
 from __future__ import annotations
 
@@ -24,11 +27,15 @@ from typing import Any
 from .vectorstore import VectorRecord
 
 
-class PineconeVectorStore:  # pragma: no cover - requires a live Pinecone account
+class PineconeVectorStore:  # pragma: no cover - requires a live Pinecone (cloud or local emulator)
     def __init__(self) -> None:
         from pinecone import Pinecone  # modern SDK (pinecone>=3)
 
-        self._pc = Pinecone(api_key=os.environ["PINECONE_API_KEY"])
+        self._host = os.getenv("PINECONE_HOST", "")  # set -> Pinecone Local emulator
+        kw = {"api_key": os.environ["PINECONE_API_KEY"]}
+        if self._host:
+            kw["host"] = self._host
+        self._pc = Pinecone(**kw)
         self._name = os.getenv("PINECONE_INDEX", "ai-assistant")
         self._namespace = os.getenv("PINECONE_NAMESPACE", "")
         self._cloud = os.getenv("PINECONE_CLOUD", "aws")
@@ -51,7 +58,13 @@ class PineconeVectorStore:  # pragma: no cover - requires a live Pinecone accoun
                 metric="cosine",
                 spec=ServerlessSpec(cloud=self._cloud, region=self._region),
             )
-        self._index = self._pc.Index(self._name)
+        # The emulator returns a per-index host; the SDK resolves it from describe_index. Pass the
+        # host explicitly so cross-container access works against Pinecone Local.
+        try:
+            host = self._pc.describe_index(self._name).host
+            self._index = self._pc.Index(host=host) if host else self._pc.Index(self._name)
+        except Exception:
+            self._index = self._pc.Index(self._name)
         return self._index
 
     # ---- write path ----

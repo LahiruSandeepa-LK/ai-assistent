@@ -15,10 +15,18 @@ def tracing_enabled() -> bool:
 
 
 def configure() -> None:
-    """Make LangChain/LangGraph emit to LangSmith when enabled (sets the env flags they read)."""
+    """Align the env flags LangChain/LangGraph/langsmith read with our gate.
+
+    When enabled (key + flag), turn auto-tracing on. When NOT enabled, actively force the flags
+    OFF — otherwise a stray `LANGSMITH_TRACING=true` (e.g. from .env) with no/invalid API key makes
+    the langsmith uploader 401-spam on every run. docs/07."""
     if tracing_enabled():
         os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
         os.environ.setdefault("LANGCHAIN_PROJECT", os.getenv("LANGSMITH_PROJECT", "ai-assistant"))
+    else:
+        for flag in ("LANGSMITH_TRACING", "LANGCHAIN_TRACING_V2", "LANGCHAIN_TRACING"):
+            if os.environ.get(flag, "").lower() in ("1", "true", "yes"):
+                os.environ[flag] = "false"
 
 
 def traced(name: str | None = None, run_type: str = "tool"):

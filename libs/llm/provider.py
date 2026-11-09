@@ -43,8 +43,10 @@ class MockProvider(BaseProvider):
             text = self._synthesize(user)
         elif "TASK: summarize" in system:
             text = self._summarize(user)
+        elif "TASK: context" in system:
+            text = self._context(user)
         else:
-            text = "I can only answer from retrieved ABC Bank documents."
+            text = "How can I help you with ABC Bank's products and services?"
         return Completion(text, _count_tokens(system + user), _count_tokens(text))
 
     def _synthesize(self, user: str) -> str:
@@ -56,19 +58,21 @@ class MockProvider(BaseProvider):
             question = mq.group(1).strip()
         if not blocks:
             return "I couldn't find supporting evidence in the knowledge base, so I can't answer that confidently."
-        # take the two most relevant blocks (already ranked upstream)
+        # take the two most relevant blocks (already ranked upstream). The [DOC_ID] markers are
+        # stripped before the customer sees the reply; they exist only for citation validation.
         top = blocks[:2]
-        lead = top[0][2].strip().split("\n")
-        body = " ".join(lead)[:280]
+        body = " ".join(top[0][2].strip().split("\n"))[:320].rstrip()
         cites = " ".join(f"[{b[0]}]" for b in top)
-        return (
-            f"{body} {cites}\n\n"
-            f"(Answer grounded in the retrieved ABC Bank documents above.)"
-        )
+        return f"{body} {cites}"
 
     def _summarize(self, user: str) -> str:
+        # internal memory summary (never shown to the customer)
         words = user.split()
-        return "Summary: " + " ".join(words[:50]) + ("…" if len(words) > 50 else "")
+        return " ".join(words[:50]) + ("…" if len(words) > 50 else "")
+
+    def _context(self, user: str) -> str:
+        return ("Happy to help — could you tell me a bit more about what you'd like to know "
+                "regarding ABC Bank's products or services?")
 
 
 def build_provider(name: str, *, api_key: str | None = None, model_strong: str | None = None,

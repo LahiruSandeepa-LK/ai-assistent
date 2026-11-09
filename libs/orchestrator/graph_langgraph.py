@@ -147,6 +147,10 @@ def _build():
     return g.compile(checkpointer=MemorySaver())
 
 
+# Normalise tracing env at import so a stray LANGSMITH_TRACING=true with no key can't start the
+# langsmith uploader (401 spam) before the first run.
+configure()
+
 _COMPILED = None
 
 
