@@ -1,253 +1,286 @@
 # Enterprise AI Assistant — ABC Bank (fictional)
 
 > **AI Lead Technical Assessment** · Author: Lahiru · Role: AI Solution Architect / AI-ML Lead
-> Status: **Design complete + runnable POC implemented** (offline-capable; real Pinecone/LLM/Keycloak via env).
+> Status: **Running enterprise stack** — real Gemini LLM (+ OpenAI fallback), real Gemini
+> embeddings, real Pinecone vector DB, real Keycloak OIDC, real Redis + Postgres, on Docker Compose.
 
-An agentic RAG assistant over organizational knowledge, branded as **ABC Bank** (a *fictional*
-example company — no real or sensitive data). Microservice **monorepo** on **Docker Compose**,
-orchestrated with LangGraph, with a **Recursive Language Model (RLM)** research flow, hybrid
-retrieval, two interfaces (public chat + admin console), per-user **token budgets**, guardrails,
-RBAC, and full observability.
+An **agentic RAG** assistant over organizational knowledge, branded as **ABC Bank** (a *fictional*
+bank — no real or sensitive data). It answers customer questions about banking products and services
+(loans, deposits, cards, accounts, exchange rates, remittances, account opening) from an indexed
+knowledge base, with retrieval-grounded, cited answers.
 
-The core engine runs **offline with zero external credentials** (deterministic mock LLM + local
-hybrid index), and swaps in real **Pinecone / Anthropic / OpenAI / Keycloak / Redis / Postgres**
-when the matching env vars are set.
+This is **not a thin wrapper around an LLM + vector DB.** It is a microservice **monorepo**
+orchestrated with **LangGraph**, with a Recursive-Language-Model research flow, hybrid retrieval,
+two web interfaces (public chat + admin console), RBAC, input/output guardrails, provider
+fail-over, per-session token caps, and full observability.
 
-## Quick start
+## The stack is real by default
 
-```bash
-make install          # dev deps (the engine itself is stdlib-only)
-make test             # unit + e2e + tools + backends + auth/admin/llm + integration (65 tests)
-make demo             # full pipeline over the sample corpus, offline
-make eval             # accuracy golden-set scorecard (Recall@k, citation integrity)
-make api              # run the API gateway at :8000 (dev auth: Bearer viewer|analyst|admin)
-make up               # full containerised stack (docker compose)
+Out of the box (`.env` from `.env.example`), every dependency is a real backend — not a mock:
+
+| Capability | Real implementation (default) | Configured by |
+|---|---|---|
+| **LLM** | **Google Gemini** for synthesis, routing, summarisation | `LLM_PROVIDER=gemini` + `GEMINI_API_KEY` |
+| **LLM fail-over** | **OpenAI** when Gemini times out / errors | `LLM_FALLBACK=openai` + `OPENAI_API_KEY` |
+| **Embeddings** | **Gemini `text-embedding-004`** — meaning-based dense vectors | `EMBEDDING_PROVIDER=gemini` |
+| **Vector DB** | **Pinecone** (managed cloud, or local emulator container) | `PINECONE_API_KEY` / `PINECONE_HOST` |
+| **Auth** | **Keycloak OIDC** — realm-as-code, SSO brokering + password grant | `AUTH_MODE=keycloak` |
+| **Cache / budget / rate-limit** | **Redis** (local container) | `REDIS_URL` |
+| **History / jobs / doc registry** | **Postgres** (local container) | `POSTGRES_DSN` |
+| **Service-to-service** | **Real HTTP** between 9 services | `*_URL` (set by compose) |
+
+> A dependency-free offline mode still exists for fast unit tests (mock LLM, hashing embedder,
+> in-memory stores) — it activates only when the corresponding env vars are blank. The shipped
+> configuration runs the real stack.
+
+## High-level architecture
+
+```mermaid
+flowchart TB
+    subgraph Clients
+        PUB["Public Chat UI<br/>(Streamlit)"]
+        ADM["Admin Console<br/>(Streamlit)"]
+    end
+
+    subgraph Edge
+        API["ai-assistant-api<br/>auth · RBAC · rate-limit<br/>token gate · session cap"]
+        ADMSVC["ai-admin-service<br/>upload+indexing · LLM config"]
+    end
+
+    ORCH["ai-orchestrator<br/>LangGraph brain<br/>router · guardrails · RLM"]
+
+    subgraph Services
+        RET["ai-knowledge-retrieval<br/>/search (hybrid)"]
+        ING["ai-knowledge-ingest<br/>/ingest"]
+        TOOL["ai-tool-service<br/>/call + MCP server"]
+        CONV["ai-conversation-service<br/>memory · usage"]
+        GW["ai-model-gateway<br/>provider chain + metering"]
+    end
+
+    subgraph Data["Data & state (containers)"]
+        PINE[("Pinecone<br/>vectors")]
+        PG[("Postgres<br/>history · jobs · docs")]
+        REDIS[("Redis<br/>cache · budget · rate")]
+        KC[("Keycloak<br/>OIDC realm")]
+    end
+
+    subgraph External["External AI providers"]
+        GEM(["Google Gemini<br/>LLM + embeddings"])
+        OAI(["OpenAI<br/>fallback LLM"])
+    end
+
+    PUB --> API
+    ADM --> ADMSVC
+    API --> ORCH
+    API -. verify JWT .-> KC
+    PUB -. SSO / login .-> KC
+    ORCH --> RET & TOOL & CONV & GW
+    ADMSVC --> ING
+    RET --> PINE
+    ING --> PINE
+    CONV --> PG & REDIS
+    API --> REDIS
+    GW --> GEM
+    GW -. on timeout/error .-> OAI
+    RET -. embed query .-> GEM
+    ING -. embed chunks .-> GEM
 ```
 
-Example (what `make demo` shows): asking *"root cause of the 2026-01-21 payment outage?"* →
-`Ledger PostgreSQL connection pool exhaustion. [INC-2026-0121] [INC-2025-1219]` — grounded, cited,
-with the router/retrieval/validation events streamed live, token usage metered, and a repeat of
-the same question served from the **semantic cache**.
+## Request flow (a chat question)
 
-## Project structure (matches the code)
+```mermaid
+sequenceDiagram
+    participant U as User (browser)
+    participant API as ai-assistant-api
+    participant O as ai-orchestrator
+    participant G as ai-model-gateway
+    participant R as retrieval (Pinecone)
+    U->>API: POST /api/chat (JWT, session_id, message)
+    API->>API: validate JWT (Keycloak JWKS) · RBAC · rate-limit
+    API->>API: token-budget + session-cap gate (Redis)
+    API->>O: /agent/run
+    O->>O: input guardrails (injection + banking-scope)
+    O->>O: router (greeting / cache / context / retrieval / research)
+    O->>R: hybrid search → top-5 chunks
+    O->>G: /complete (synthesis)
+    G->>G: Gemini (≤30s) → OpenAI (≤30s) → timeout msg
+    G-->>O: answer + token counts
+    O->>O: output guardrails (citation check · secret redaction)
+    O-->>API: grounded, cited answer (+ route, usage)
+    API-->>U: humanised answer · sources · session usage
+```
+
+## Quick start (real stack)
+
+**Prerequisites:** Docker + Docker Compose, a **Gemini API key** (Google AI Studio), and
+optionally an **OpenAI key** (for LLM fail-over) and a **Pinecone key** (or use the local
+emulator). Redis, Postgres and Keycloak run as containers — nothing to install.
+
+```bash
+cp .env.example .env
+#  edit .env and set:
+#    GEMINI_API_KEY=...        (required — real LLM + embeddings)
+#    OPENAI_API_KEY=...        (optional — enables the OpenAI fallback)
+#    PINECONE_API_KEY=...      (optional — omit to use the local Pinecone emulator below)
+
+# full real stack (Gemini LLM/embeddings, Keycloak, Redis, Postgres, HTTP microservices)
+docker compose up --build
+
+# …or add the local Pinecone emulator (no Pinecone account needed)
+docker compose -f docker-compose.yml -f docker-compose.pinecone.yml up --build
+```
+
+Then open the **public chat** at `http://localhost:8501` and the **admin console** at
+`http://localhost:8502`. The banking knowledge base is auto-ingested on startup.
+
+> Fast offline tests (no credentials): `make test` → **81 passing** (3 env-dependent skips).
+> `make eval` → golden-set scorecard (Recall@k, citation integrity).
+
+## Configure the LLM provider
+
+Every model call funnels through `ai-model-gateway` → `libs/llm` (ADR-010), so the provider is
+**configuration, not code**. The gateway runs an ordered chain with a per-provider timeout and
+transparent fail-over:
+
+```mermaid
+flowchart LR
+    REQ["LLM request"] --> P1
+    P1{"Gemini<br/>≤ LLM_CALL_TIMEOUT"} -- ok --> OUT["answer + tokens"]
+    P1 -- timeout / error --> P2
+    P2{"OpenAI<br/>≤ LLM_CALL_TIMEOUT"} -- ok --> OUT
+    P2 -- timeout / error --> TO["timeout message<br/>(route=timeout)"]
+```
+
+```bash
+# primary provider
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=...                 # from Google AI Studio (keep ONLY in .env, never committed)
+GEMINI_MODEL_STRONG=gemini-3.8-flash   # synthesis / validation
+GEMINI_MODEL_FAST=gemini-3.8-flash     # routing / summarise
+
+# fail-over provider (tried only if the primary times out or errors)
+LLM_FALLBACK=openai
+OPENAI_API_KEY=...                 # required, or the fallback degrades to a timeout message
+
+# resilience knobs
+LLM_CALL_TIMEOUT=30                # seconds per provider before switching to the next
+MODEL_GATEWAY_HTTP_TIMEOUT=        # blank = auto (2*LLM_CALL_TIMEOUT + 15)
+```
+
+- `LLM_PROVIDER` accepts `gemini | anthropic | openai | mock`. Each adapter
+  (`libs/llm/provider_gemini.py`, `provider_openai.py`, `provider_anthropic.py`) implements one
+  method — `complete(system, user, model) -> Completion` — mapping the provider's text + token
+  counts into the pipeline. Add any model by dropping in a new `provider_*.py` and registering it.
+- **Every call is logged** in the gateway (`llm_request` / `llm_response` / `llm_timeout`) with
+  provider, model and input/output token counts.
+- **Runtime switch (no restart):** an Administrator can create and activate an LLM config from the
+  admin console (provider + model slugs + API key). The gateway rebuilds live. The API key is
+  **write-only** — accepted once, stored server-side, never returned or shown (list responses carry
+  only a `has_secret` flag).
+
+## User roles & functionalities
+
+Three roles, enforced by the RBAC matrix + Policy Enforcement Point (`libs/authz`) and mapped from
+Keycloak realm/client roles:
+
+| | **Public / Viewer** | **Analyst** | **Administrator** |
+|---|---|---|---|
+| **Sign-in** | SSO / self-registration → **Viewer** (or `public / Public#12345`) | username + password (`analyst / Analyst#12345`) | username + password (`admin / Admin#12345`) |
+| Ask the assistant (grounded, cited answers) | ✅ | ✅ | ✅ |
+| Hybrid retrieval over the knowledge base | ✅ | ✅ | ✅ |
+| Session memory + recent-conversations view | ✅ | ✅ | ✅ |
+| Tools (web search, MCP directory, doc parser) | — | ✅ | ✅ |
+| Deeper research (multi-step RLM) | — | ✅ | ✅ |
+| Higher token budget | Viewer tier | Analyst tier | Admin tier |
+| **Upload documents** (PDF/Word/Excel/MD/HTML/TXT) + live indexing progress | — | — | ✅ |
+| **Configure the LLM provider** at runtime | — | — | ✅ |
+| Run the evaluation scorecard | — | — | ✅ |
+
+**Two login models by design.** Public users authenticate via **SSO / identity brokering** and are
+granted **Viewer** automatically; staff (**Analyst**, **Administrator**) use **username/password**
+(OIDC password grant). Both paths issue JWTs that the API validates against the Keycloak realm JWKS.
+
+## Guardrails, resilience & limits
+
+- **Input guardrails** — a prompt-**injection** screen *and* a **banking-scope** rail: off-domain
+  questions (e.g. "write me a poem") are rejected at the input before any LLM or retrieval call,
+  with a polite on-brand message (`libs/orchestrator/guardrails.py`).
+- **Output guardrails** — citation integrity (no fabricated document IDs) and secret redaction.
+- **Provider fail-over** — Gemini → OpenAI → timeout message, per-provider `LLM_CALL_TIMEOUT`.
+- **Per-session token cap** — each chat is capped (`SESSION_TOKEN_CAP`, default **100,000**;
+  `0` disables). On reaching it the user is asked to start a new chat; the UI shows a live token
+  meter. Counts are tallied per session in Redis.
+- **Per-user token budget** + **rate limiting** (Redis), pre-checked at the edge.
+- **Graceful degradation** — no inference path returns a 500; upstream failures become friendly,
+  logged, degraded answers.
+
+## Knowledge base
+
+The shipped corpus models a retail bank (ABC Bank) — 10 product/policy documents covering deposits
+& rates, personal loans, home loans, leasing & gold, non-resident banking, forex & exchange rates,
+business banking, investments, account-opening procedures, and cards
+(`services/ai-knowledge-service/ingestion/sample_docs/`). Retrieval is **hybrid**: dense (Gemini
+embeddings, by *meaning*) + BM25 (by *text*) → **RRF fusion** → rerank → access filter → **top-5**
+chunks to the LLM.
+
+## Project structure
 
 ```
 AI_Assistant/
-├── README.md  Makefile  docker-compose.yml  docker-compose.dev.yml
-├── .env.example  pyproject.toml  conftest.py  pytest.ini  requirements-dev.txt
+├── README.md  Makefile  docker-compose.yml  docker-compose.pinecone.yml
+├── .env.example  pyproject.toml  conftest.py  pytest.ini
 │
-├── libs/                              # the ENGINE (pure-stdlib core; shared by every service)
-│   ├── contracts/     models.py · errors.py          # dataclasses, AgentEvent, error taxonomy
-│   ├── authz/         rbac.py · policy.py · identity.py   # role matrix, PEP, dev/Keycloak auth
-│   ├── authclient/    keycloak_client.py             # UI-side token acquisition (SSO + password)
-│   ├── observability/ logging.py                      # structured JSON logs + correlation ids
-│   ├── llm/           provider.py · gateway.py · config_store.py   # providers + metering + runtime LLM config
-│   ├── rag/           chunking · embeddings(+openai) · bm25 · vectorstore(+pinecone/local) · hybrid · store · ingest
-│   ├── memory/        conversation.py · usage.py · redis_client.py   # history, cache, token budget (Redis-backed)
-│   ├── db/            engine.py · stores.py           # Postgres: history, jobs, doc registry (SQLAlchemy)
-│   ├── clients/       services.py                     # HTTP clients for true service-to-service calls
-│   ├── admin/         jobs.py · ingest_runner.py      # upload job store + staged indexing w/ progress
-│   └── orchestrator/  graph.py(+graph_langgraph) · ops · prompts · guardrails · tools
-│                       · mcp_client · mcp_data · tool_web · tool_docparser   # the brain + tools
+├── libs/                              # the ENGINE (shared by every service)
+│   ├── contracts/     models.py · errors.py
+│   ├── authz/         rbac.py · policy.py · identity.py       # roles, PEP, Keycloak/dev auth
+│   ├── authclient/    keycloak_client.py                     # UI token acquisition (SSO + password)
+│   ├── observability/ logging.py                             # structured JSON logs + correlation ids
+│   ├── llm/           provider(+gemini/openai/anthropic) · gateway · config_store
+│   ├── rag/           chunking · embeddings(+gemini/openai) · bm25 · vectorstore(+pinecone) · hybrid · ingest
+│   ├── memory/        conversation · usage (user + session) · redis_client
+│   ├── db/            engine · stores                        # Postgres (SQLAlchemy 2.0)
+│   ├── clients/       services.py                            # HTTP clients (service-to-service)
+│   ├── admin/         jobs · ingest_runner                   # upload jobs + staged indexing
+│   └── orchestrator/  graph(+graph_langgraph) · ops · prompts · guardrails · tools · mcp_*
 │
-├── services/                         # thin deployables that import libs
-│   ├── ai-assistant-api/   app/main.py        # chat edge: auth·RBAC·rate-limit·TOKEN gate·SSE
-│   ├── ai-orchestrator/    app/main.py        # /agent/run (LangGraph brain)
-│   ├── ai-knowledge-service/
-│   │   ├── retrieval/      app/main.py        # /search  (READ path)
-│   │   └── ingestion/      app/main.py · cli.py · sample_docs/   # /ingest (WRITE) + 20-doc corpus
-│   ├── ai-tool-service/    app/main.py · server.py   # REST /call + REAL MCP server (FastMCP/MCPServer, stdio)
-│   ├── ai-conversation-service/ app/main.py   # /context · /usage/check · /usage/record
-│   ├── ai-model-gateway/   app/main.py        # /complete (routing + fallback + metering)
-│   ├── ai-admin-service/   app/main.py · eval/run_eval.py   # doc upload+progress, LLM config, eval (admin-only)
-│   ├── ui-public/          app.py             # Streamlit chat + SSO/staff login + activity panel
-│   └── ui-admin/           app.py             # Streamlit admin console (login, upload+progress, LLM config)
+├── services/                         # thin FastAPI / Streamlit deployables
+│   ├── ai-assistant-api/     chat edge: auth·RBAC·rate-limit·token+session gate·SSE
+│   ├── ai-orchestrator/      /agent/run (LangGraph brain)
+│   ├── ai-knowledge-service/ retrieval (/search) + ingestion (/ingest) + banking corpus
+│   ├── ai-tool-service/      /call + real MCP server (stdio)
+│   ├── ai-conversation-service/  /context · usage
+│   ├── ai-model-gateway/     /complete (provider chain + fallback + metering)
+│   ├── ai-admin-service/     doc upload+progress · runtime LLM config · eval
+│   ├── ui-public/            Streamlit chat + SSO/staff login + token meter
+│   └── ui-admin/             Streamlit admin console
 │
-├── infra/keycloak/abc-bank-realm.json   # realm-as-code: clients, roles, SSO broker, seeded staff
-├── scripts/demo.py                   # end-to-end offline demo
-├── tests/                            # unit · e2e · langgraph · tools · backends · auth · admin · llm-config · integration (65 tests)
-├── fixtures/sample_docs/ + golden.jsonl   # small corpus + golden set for tests/eval
-│
-├── docs/   00–15 design docs + adr/ADR-001…010   (architecture, RAG, security, token budget, eval)
-├── diagrams/  12 .drawio (C4, service map, flows, RAG ingest, eval)
-└── skills/    3 reusable SKILL.md
+├── infra/keycloak/abc-bank-realm.json   # realm-as-code: clients, roles, SSO broker, seeded users
+├── tests/                            # 81 passing: unit · e2e · langgraph · tools · backends · auth · admin · llm-config · timeout/session · integration
+├── docs/   00–20 design docs + ADRs 001–011
+└── diagrams/  C4 (L1–L3), service map, LangGraph flow, RAG ingest/retrieve, deployment, eval (.drawio)
 ```
 
-> **Service ↔ engine:** business logic lives in `libs/` so it is shared, unit-tested, and
-> runnable standalone; each `services/*` is a thin FastAPI/Streamlit entrypoint. The
-> `ai-assistant-api` runs the orchestrator in-process for the POC (set `ORCHESTRATOR_URL` to call
-> it over HTTP instead). `docs/13-service-topology.md` is the canonical service map.
+## Observability
 
-## What is real vs. mocked (honest status)
-
-| Area | Status |
-|------|--------|
-| Section-aware chunking, BM25 + local dense + **RRF fusion + rerank**, metadata/access filter | ✅ real, tested |
-| **Orchestration** — real **LangGraph** `StateGraph` (checkpointer, conditional edges, **`Send`** fan-out for RLM, **`interrupt`** HITL); dependency-free fallback pipeline when `langgraph` is absent (`USE_LANGGRAPH=off`) | ✅ real, tested |
-| RLM research (decompose → `Send` fan-out → aggregate), router (cache / context / retrieval / research) | ✅ real, tested |
-| **Observability** — **LangSmith** tracing of node transitions + LLM/retriever spans (auto when enabled), structured JSON logs, live activity-event stream | ✅ wired (no-op offline) |
-| Guardrails (prompt-injection screen, **citation integrity**, secret redaction), RBAC + PEP | ✅ real, tested |
-| **Tools + agent tool-routing** — knowledge_search, **MCP** (real FastMCP/MCPServer over stdio; in-process fallback), **web_search** (Tavily when `TAVILY_API_KEY` set; offline stub otherwise), **document_parser** (md/html/txt stdlib; pdf/docx optional), python_analysis — router detects tool-intent, PEP-gated, traced | ✅ real, tested |
-| **Token budget** (pre-check + post-call metering), rate limiting, memory + summarize-after-10 + semantic cache | ✅ real, tested |
-| LLM | **MockProvider** (deterministic, extractive, cited) offline; **Gemini / Anthropic / OpenAI** adapters hook in via `LLM_PROVIDER` + key (see "Connecting a real LLM") |
-| Embeddings | hashing embedder offline; **real OpenAI embeddings** (`embeddings_openai.py`) via `EMBEDDING_PROVIDER=openai` |
-| Vector DB | in-memory cosine index offline; **real Pinecone** via `PINECONE_API_KEY` — managed cloud, or the **local emulator** in Docker (`docker-compose.pinecone.yml`, no account needed) |
-| Auth | dev users offline; **real Keycloak OIDC** (`AUTH_MODE=keycloak`) — realm-as-code, **SSO brokering → Viewer** (public), **username/password** (staff), JWKS-verified JWT, realm + client role mapping |
-| Admin console | **document upload** (pdf/docx/xlsx/md/txt/html) with **live indexing progress**, and **runtime LLM configuration** (create-only; API keys write-only) — Administrator-only |
-| **State — Redis** | in-memory offline; **real Redis** via `REDIS_URL` — token budget (atomic INCR), rate limiting (fixed-window), shared semantic cache | ✅ real, integration-tested |
-| **State — Postgres** | in-memory offline; **real Postgres** via `POSTGRES_DSN` — conversation history, rolling summaries, ingest jobs, document registry (SQLAlchemy) | ✅ real, integration-tested |
-| **Service-to-service** | in-process offline; **real HTTP** between services when `*_URL` set — API→orchestrator→{retrieval, tools, model-gateway, conversation} | ✅ real, integration-tested |
-
-## Connecting a real LLM (e.g. Gemini)
-
-Every model call funnels through `ai-model-gateway` → `libs/llm` (ADR-010), so switching from
-the offline mock to a real model is **config only** — no code change:
+Structured JSON logs with correlation IDs across every service; a live agent-activity event stream
+in the UIs; and **LangSmith** tracing of LangGraph node transitions + LLM/retriever spans when
+enabled:
 
 ```bash
-# Google Gemini
-export LLM_PROVIDER=gemini
-export GEMINI_API_KEY=...                 # from Google AI Studio
-export GEMINI_MODEL_STRONG=gemini-2.5-pro   # synthesis/validation (set to a model you have)
-export GEMINI_MODEL_FAST=gemini-3.8-flash   # routing/summarise (cheaper)
-pip install google-genai
-# optional resilience: fall back to another provider on error (ADR-003 / E1)
-export LLM_FALLBACK=openai   OPENAI_API_KEY=...
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=...
+LANGSMITH_PROJECT=ai-assistant
 ```
 
-Then `make demo` / `make api` use Gemini for synthesis and summarisation, and **real token
-usage** (`usage_metadata`) is metered against each user's budget automatically.
+## Validation
 
-`LLM_PROVIDER` accepts `gemini | anthropic | openai | mock`. Each adapter
-(`libs/llm/provider_gemini.py`, `provider_anthropic.py`, `provider_openai.py`) implements one
-method — `complete(system, user, model) -> Completion` — and maps the provider's response text +
-token counts into the pipeline. To add any other model, drop in a new `provider_*.py` with that
-one method and register it in `get_provider()`. Model slugs are env-overridable because they
-change often; set them to models your key can access.
-
-## Connecting a real vector DB (Pinecone)
-
-The whole RAG engine reads/writes the vector store through one interface
-(`libs/rag/vectorstore.py`), so switching from the in-memory index to Pinecone is **config
-only** — `get_vector_store()` returns the Pinecone adapter the moment a key is present:
-
-```bash
-export PINECONE_API_KEY=...
-export PINECONE_INDEX=ai-assistant        # default
-export PINECONE_NAMESPACE=abc-bank        # optional, for multi-tenant isolation
-export PINECONE_CLOUD=aws                  # serverless spec (default aws / us-east-1)
-export PINECONE_REGION=us-east-1
-pip install pinecone
-```
-
-The adapter (`libs/rag/vectorstore_pinecone.py`) creates the index lazily on first upsert
-using the live embedding dimension — so it works with the offline 256-dim hashing embedder
-**or** a 1536-dim OpenAI embedder with no extra config — and deletes by `doc_id` reliably
-(id tracking, with a metadata-filter fallback for pod indexes). Pair it with
-`EMBEDDING_PROVIDER=openai` for production-grade recall.
-
-## Authentication — two login models (Keycloak)
-
-The `abc-bank` realm is provisioned **as code** (`infra/keycloak/abc-bank-realm.json`) and
-auto-imported on `docker compose up`. Two distinct login paths, by design:
-
-- **Public users → SSO → Viewer.** The public chat UI's *"Continue with SSO"* runs
-  Authorization-Code + PKCE against Keycloak (the realm's OIDC provider). By **default** it uses
-  Keycloak's own login page and the realm grants **Viewer** by default (self-registration is
-  enabled; seeded demo account `public / Public#12345`). To front this with a **real corporate
-  IdP** (identity brokering), fill the `corporate-sso` broker's creds in the realm and set
-  `KEYCLOAK_SSO_IDP=corporate-sso` — then the button jumps straight to that IdP and the
-  first-login mapper assigns Viewer. Leaving `KEYCLOAK_SSO_IDP` empty (the default) avoids
-  redirecting to an unconfigured broker.
-- **Staff (admin / analyst) → username / password.** Both UIs offer a credential form that uses
-  the OIDC Resource-Owner Password grant against the `ai-assistant-admin` client. Seeded demo
-  users: `admin / Admin#12345` (Administrator), `analyst / Analyst#12345` (Analyst).
-
-```bash
-export AUTH_MODE=keycloak
-export KEYCLOAK_URL=http://host.docker.internal:8080   # stable issuer for browser + containers
-export KEYCLOAK_REALM=abc-bank
-export KEYCLOAK_WEB_CLIENT_ID=ai-assistant-web          # public SSO client (auth-code + PKCE)
-export KEYCLOAK_ADMIN_CLIENT_ID=ai-assistant-admin      # staff client (password grant)
-export KEYCLOAK_SSO_IDP=corporate-sso                   # brokered IdP alias
-export KEYCLOAK_VERIFY_AUD=false
-# optional: map your IdP's role names onto the app's three roles
-export KEYCLOAK_ROLE_MAP="kc-reader:Viewer,kc-analyst:Analyst,kc-admin:Administrator"
-```
-
-The API side only **validates** tokens: it checks each bearer JWT against the realm JWKS
-(cached, rotation-safe), verifies the issuer, and maps **realm + client roles** onto
-Viewer/Analyst/Administrator — the same roles the PEP and RBAC matrix enforce. The UIs
-**acquire** tokens via `libs/authclient`. Dev mode (`AUTH_MODE=dev`) still works offline with
-the viewer/analyst/admin shortcuts. **Networking note:** both the browser (SSO redirect) and the
-containers (token/JWKS calls) use `http://host.docker.internal:8080`, and Keycloak pins that as
-its issuer (`KC_HOSTNAME_URL`), so the issuer is identical on both sides — the one thing to
-verify live on `docker compose up`. On a **Linux** host (not Docker Desktop) the browser also
-needs a hosts entry — `127.0.0.1 host.docker.internal` in `/etc/hosts` — for the SSO redirect;
-staff password login is server-side and unaffected. The brokered `corporate-sso` IdP ships with
-`REPLACE_WITH_*` placeholders in the realm file — set real IdP client creds there (or in the
-Keycloak admin console) to activate public SSO; staff sign-in works without it.
-
-## Admin console
-
-Administrator-only (`services/ui-admin`, `ai-admin-service`):
-
-- **Document upload + live indexing progress.** Upload a PDF, Word, Excel, Markdown, HTML or
-  text file; it's parsed, chunked and indexed in a background job, and the UI shows a progress
-  bar advancing through *extracting → chunking → indexing → done* (polling `/admin/jobs/{id}`).
-  Offline, the admin service and the chat API share the index through a file snapshot
-  (`INDEX_PATH` on the `kbindex` volume), so a freshly uploaded document is immediately
-  searchable in chat; with Pinecone configured, that shared store is used instead.
-- **Runtime LLM configuration.** Create an LLM config (provider + model slugs + API key) and
-  activate it live — the model gateway rebuilds to use it. **Create-only** (no edit after
-  creation) and the **API key is write-only**: it's accepted once, stored server-side, and
-  **never returned by any endpoint or shown in the UI** (list/response carry only a
-  `has_secret` flag). Secrets live in a gitignored server-only file for the POC; back it with a
-  secrets manager (Vault/KMS) in production — see `docs/adr/ADR-011`.
-
-## Enabling LangSmith tracing
-
-```bash
-export LANGSMITH_TRACING=true
-export LANGSMITH_API_KEY=...
-export LANGSMITH_PROJECT=ai-assistant
-```
-With these set, the LangGraph node transitions auto-trace to LangSmith, the LLM and retriever
-calls appear as spans, and each answer carries a shareable `trace` event with the run URL (for the
-demo video, deliverable D4). Unset, everything runs identically with tracing off.
-
-## Real backends & scaling (no mocks)
-
-Every external dependency has a real integration that activates by env var, with an offline
-fallback so the POC still runs with zero credentials. All of these are integration-tested against
-live servers.
-
-- **Redis** (`REDIS_URL`) — token budget uses atomic `INCRBY` with period-end expiry; API rate
-  limiting uses a shared fixed-window counter; the semantic cache is shared across replicas. Code:
-  `libs/memory/redis_client.py`, `usage.py`, `conversation.py`.
-- **Postgres** (`POSTGRES_DSN`) — conversation history, rolling summaries, ingest jobs and a
-  document registry persist via SQLAlchemy 2.0 (`libs/db/`). Any asyncpg/psycopg DSN is accepted
-  and driven with psycopg2.
-- **Service-to-service HTTP** — set the `*_URL` vars and the stack runs as true microservices:
-  `ai-assistant-api` → `ai-orchestrator` → {`ai-knowledge-retrieval` `/search`, `ai-tool-service`
-  `/call`, `ai-model-gateway` `/complete`, `ai-conversation-service`}. The same code runs
-  in-process (offline/tests) or over HTTP (compose) — `libs/clients/services.py`. Leaf services
-  clear their own `*_URL` so they never call themselves.
-- **Pinecone** — managed cloud via `PINECONE_API_KEY`, or the **official local emulator in
-  Docker** with no account: `docker compose -f docker-compose.yml -f docker-compose.pinecone.yml
-  up --build`. Adapter honours `PINECONE_HOST` for the emulator.
-- **OpenAI embeddings** — `EMBEDDING_PROVIDER=openai` swaps the offline hashing embedder for
-  `text-embedding-3-small` (`libs/rag/embeddings_openai.py`).
-
-`docker compose up` wires Redis, Postgres, Keycloak and the full HTTP topology together; the
-`docker-compose.pinecone.yml` override adds real Pinecone. See `docs/19-live-validation-runbook.md`
-for the step-by-step bring-up and what to verify.
-
-## Validation (architect ⇄ evaluator loop)
-
-`make test` → **62 passing** offline (3 env-dependent skips); **64** with Redis+Postgres live. `make eval` on the golden set → **Recall@k = 1.0, citation
-integrity = 1.0**. The loop caught and fixed a real retrieval-precision bug (date/ID queries
-ranked the wrong incident until document metadata was indexed with each chunk).
+`make test` → **81 passing** offline (3 env-dependent skips); more with Redis+Postgres live.
+`make eval` on the golden set → **Recall@k = 1.0, citation integrity = 1.0**. The architect ⇄
+evaluator loop caught and fixed a real retrieval-precision bug (date/ID queries ranked the wrong
+document until chunk-level metadata was indexed).
 
 ## Reading the design
-Start with `docs/00-requirements-traceability.md` and `docs/13-service-topology.md`; the full
-index is in that folder (00–15 + ADRs 001–010) with diagrams in `diagrams/`.
+
+Start with `docs/00-requirements-traceability.md`, `docs/13-service-topology.md`, and the teaching
+walkthrough `docs/20-system-explained.md`. The full index (00–20 + ADRs 001–011) is in `docs/`, with
+editable diagrams in `diagrams/`.
