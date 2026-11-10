@@ -32,13 +32,23 @@ class HashingEmbedder:
 
 
 def get_embedder():
-    """Return the configured embedder. Falls back to HashingEmbedder offline."""
+    """Return the configured embedder. Falls back to HashingEmbedder offline.
+
+    IMPORTANT: when a real provider is configured (EMBEDDING_PROVIDER=gemini/openai) but fails to
+    construct — e.g. the EMBEDDING_MODEL is 404 for the key — we fall back to HashingEmbedder so the
+    pipeline keeps working, but we LOG IT LOUDLY. A silent fallback once turned "semantic" dense
+    retrieval into keyword-hash without anyone noticing, which badly hurt recall. docs/04 §5."""
+    import sys
+
     provider = os.getenv("EMBEDDING_PROVIDER", "").lower()
-    if provider in ("", "hashing", "local"):
+    if provider in ("", "hashing", "hash"):
         return HashingEmbedder()
-    # Real provider hooks (only if deps + key are present). Each probes at construction; on any
-    # failure we fall back to the offline HashingEmbedder so the index dimension stays consistent.
+    # Real provider hooks (only if deps + key are present). Each probes at construction.
     try:  # pragma: no cover
+        if provider in ("local", "fastembed", "st", "sentence-transformers"):
+            from .embeddings_local import LocalEmbedder  # type: ignore
+
+            return LocalEmbedder()
         if provider == "openai":
             from .embeddings_openai import OpenAIEmbedder  # type: ignore
 
@@ -47,8 +57,14 @@ def get_embedder():
             from .embeddings_gemini import GeminiEmbedder  # type: ignore
 
             return GeminiEmbedder()
-    except Exception:
-        pass
+        print(f"[embeddings] unknown EMBEDDING_PROVIDER={provider!r} — using offline HashingEmbedder",
+              file=sys.stderr, flush=True)
+    except Exception as e:
+        model = os.getenv("EMBEDDING_MODEL", "")
+        print(f"[embeddings] WARNING: EMBEDDING_PROVIDER={provider!r} (model={model!r}) failed to "
+              f"initialise ({e!r}) — DEGRADING to offline HashingEmbedder. Dense retrieval will be "
+              f"keyword-hash, not semantic. Fix EMBEDDING_MODEL (list models that support "
+              f"embedContent) and re-ingest.", file=sys.stderr, flush=True)
     return HashingEmbedder()
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Callable, Optional
 
 import os
+import random
 import time
 
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
@@ -31,6 +32,76 @@ _TIMEOUT_MESSAGE = ("I'm sorry — I'm taking longer than usual to respond right
 
 # A small pool to run each (blocking) provider call under a timeout.
 _POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="llm")
+
+
+# ---- transient-error retry (ADR-003/E1) -------------------------------------------------------
+# A provider error like Gemini's "503 UNAVAILABLE / high demand" is TEMPORARY — retrying the same
+# provider after a short backoff usually succeeds, which is far better than cascading to a fallback
+# that may be unavailable (e.g. an OpenAI key with no credits). We retry only *retryable* errors
+# (503/500/502/504, rate-limit/overload, timeouts) and fail fast on hard errors (bad key, no
+# credits, quota exhausted, 400/401/403/404) so we don't waste the per-provider time budget.
+def _retry_max() -> int:
+    try:
+        return max(0, int(os.getenv("LLM_RETRY_MAX", "2")))   # extra attempts beyond the first
+    except ValueError:
+        return 2
+
+
+def _retry_base() -> float:
+    try:
+        return float(os.getenv("LLM_RETRY_BASE", "0.6"))      # backoff base seconds
+    except ValueError:
+        return 0.6
+
+
+_NON_RETRYABLE = ("no credits", "insufficient_quota", "insufficient quota", "quota exceeded",
+                  "exceeded your current quota", "billing", "api key not valid", "invalid api key",
+                  "invalid_api_key", "permission denied", "unauthorized", "forbidden",
+                  "not found", "400", "401", "403", "404")
+_RETRYABLE = ("503", "500", "502", "504", "unavailable", "overloaded", "high demand",
+              "temporarily", "try again", "rate limit", "ratelimit", "429", "timeout",
+              "timed out", "connection", "deadline")
+
+
+def _status_code(exc: Exception):
+    for attr in ("status_code", "code", "http_status"):
+        v = getattr(exc, attr, None)
+        if isinstance(v, int):
+            return v
+    return None
+
+
+def _is_retryable(exc: Exception) -> bool:
+    """True = worth retrying the SAME provider (transient). False = fail fast, move to next."""
+    blob = f"{type(exc).__name__}: {exc}".lower()
+    if any(k in blob for k in _NON_RETRYABLE):   # hard failures win (e.g. a 429 that is 'no credits')
+        return False
+    code = _status_code(exc)
+    if code in (500, 502, 503, 504, 429, 408):
+        return True
+    return any(k in blob for k in _RETRYABLE)
+
+
+def _call_with_retry(provider: BaseProvider, system: str, user: str, model: str):
+    """Call provider.complete, retrying transient failures with exponential backoff + jitter.
+    The whole call is still bounded by the per-provider future timeout in _complete()."""
+    import sys
+
+    attempts = _retry_max() + 1
+    base = _retry_base()
+    pname = getattr(provider, "name", "?")
+    for i in range(attempts):
+        try:
+            return provider.complete(system, user, model=model)
+        except Exception as e:
+            if i + 1 >= attempts or not _is_retryable(e):
+                raise
+            delay = min(base * (2 ** i), 5.0) + random.uniform(0, 0.25)
+            print(f"[model-gateway] provider '{pname}' transient error "
+                  f"(attempt {i + 1}/{attempts}): {e!r} — retrying in {delay:.1f}s",
+                  file=sys.stderr, flush=True)
+            time.sleep(delay)
+    raise RuntimeError("retry loop exhausted")   # unreachable
 
 
 def _clip(text: str) -> str:
@@ -95,7 +166,7 @@ class ModelGateway:
             pname = getattr(p, "name", "?")
             t0 = time.time()
             try:
-                fut = _POOL.submit(p.complete, system, user, model=model)
+                fut = _POOL.submit(_call_with_retry, p, system, user, model)
                 c = fut.result(timeout=tmo)
             except FutureTimeout as e:
                 last_err = e

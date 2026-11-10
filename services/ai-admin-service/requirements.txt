@@ -10,3 +10,7 @@ openpyxl
 redis
 sqlalchemy>=2.0
 psycopg2-binary
+
+google-genai        # EMBEDDING_PROVIDER=gemini (real semantic embeddings)
+
+fastembed        # EMBEDDING_PROVIDER=local (free offline semantic embeddings, no quota)

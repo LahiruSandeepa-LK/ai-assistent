@@ -57,6 +57,7 @@ services:
       - "./services/ai-knowledge-service/ingestion/sample_docs:/corpus:ro"
       - "llmcfg:/runtime"
       - "kbindex:/kb"
+      - "modelcache:/models"
     extra_hosts: ["host.docker.internal:host-gateway"]
     depends_on:
       ai-orchestrator: { condition: service_started }
@@ -78,6 +79,7 @@ services:
     volumes:
       - "llmcfg:/runtime"
       - "kbindex:/kb"
+      - "modelcache:/models"
     depends_on: [ai-knowledge-retrieval, ai-tool-service, ai-conversation-service, ai-model-gateway]
   ai-knowledge-retrieval:
     build: { context: ., dockerfile: services/ai-knowledge-service/retrieval/Dockerfile }
@@ -86,13 +88,13 @@ services:
     environment:
       - INDEX_PATH=/kb/index.json
       - KNOWLEDGE_RETRIEVAL_URL=   # leaf service: must not call itself
-    volumes: ["kbindex:/kb"]
+    volumes: ["kbindex:/kb", "modelcache:/models"]
   ai-knowledge-ingest:
     build: { context: ., dockerfile: services/ai-knowledge-service/ingestion/Dockerfile }
     expose: ["8400"]
     env_file: .env
     environment: ["INDEX_PATH=/kb/index.json"]
-    volumes: ["kbindex:/kb"]
+    volumes: ["kbindex:/kb", "modelcache:/models"]
     depends_on:
       postgres: { condition: service_healthy }
   ai-tool-service:
@@ -134,6 +136,7 @@ services:
     volumes:
       - "llmcfg:/runtime"
       - "kbindex:/kb"
+      - "modelcache:/models"
     extra_hosts: ["host.docker.internal:host-gateway"]
     depends_on:
       ai-knowledge-ingest: { condition: service_started }
@@ -182,3 +185,4 @@ volumes:
   pgdata:
   llmcfg:
   kbindex:
+  modelcache:

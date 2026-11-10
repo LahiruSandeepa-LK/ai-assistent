@@ -1,38 +1,26 @@
-# Real Pinecone via the official LOCAL emulator (no cloud account needed).
-# Enable with:  docker compose -f docker-compose.yml -f docker-compose.pinecone.yml up --build
-# This runs pinecone-local and points the index-using services at it, so retrieval/ingest use a
-# REAL Pinecone API (not the in-memory store). The default compose (offline) uses the in-memory
-# index + shared file; this override switches the stack to Pinecone. docs/04 §3, ADR-002.
+# ============================================================================
+# Pinecone: use MANAGED Pinecone cloud (the local emulator is retired).
+#
+# NOTE: Pinecone Local (the in-memory emulator, `pinecone-local`) reached
+# end-of-life on 2026-10-07 and no longer works with the current Python SDK
+# (create_index fails with HTTP 422). This override therefore no longer starts
+# an emulator — there is nothing to start.
+#
+# To use REAL Pinecone (free serverless tier is plenty for this corpus):
+#   1. Create a project + API key at https://app.pinecone.io
+#   2. In .env set:
+#        PINECONE_API_KEY=<your real key>     # NOT "pclocal"
+#        PINECONE_INDEX=ai-assistant
+#        PINECONE_CLOUD=aws                    # or your provider
+#        PINECONE_REGION=us-east-1             # a region your plan allows
+#        # leave PINECONE_HOST blank (that was only for the dead emulator)
+#   3. Run the NORMAL stack — no override needed:
+#        docker compose up --build
+#
+# The adapter (libs/rag/vectorstore_pinecone.py) creates the serverless index
+# lazily on first upsert using the live embedding dimension (384 for the local
+# bge-small embedder), so vectors are embedded ONCE at ingest and persisted in
+# Pinecone. With PINECONE_API_KEY blank the stack uses the in-memory index.
+# docs/04 §3, ADR-002.
+# ============================================================================
 name: ai-assistant
-services:
-  pinecone-local:
-    image: ghcr.io/pinecone-io/pinecone-local:latest
-    environment:
-      PORT_RANGE: 5080-5090
-    ports:
-      - "5080-5090:5080-5090"
-
-  ai-knowledge-retrieval:
-    environment:
-      - PINECONE_API_KEY=pclocal
-      - PINECONE_HOST=http://pinecone-local:5080
-      - PINECONE_INDEX=ai-assistant
-    depends_on: [pinecone-local]
-  ai-knowledge-ingest:
-    environment:
-      - PINECONE_API_KEY=pclocal
-      - PINECONE_HOST=http://pinecone-local:5080
-      - PINECONE_INDEX=ai-assistant
-    depends_on: [pinecone-local, postgres]
-  ai-assistant-api:
-    environment:
-      - PINECONE_API_KEY=pclocal
-      - PINECONE_HOST=http://pinecone-local:5080
-      - PINECONE_INDEX=ai-assistant
-    depends_on: [pinecone-local]
-  ai-admin-service:
-    environment:
-      - PINECONE_API_KEY=pclocal
-      - PINECONE_HOST=http://pinecone-local:5080
-      - PINECONE_INDEX=ai-assistant
-    depends_on: [pinecone-local]

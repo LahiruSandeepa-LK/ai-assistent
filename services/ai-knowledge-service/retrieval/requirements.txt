@@ -3,3 +3,7 @@ uvicorn[standard]
 pydantic
 pinecone            # optional: real vector DB (activates when PINECONE_API_KEY is set)
 openai            # optional: EMBEDDING_PROVIDER=openai
+
+google-genai        # EMBEDDING_PROVIDER=gemini (real semantic embeddings)
+
+fastembed        # EMBEDDING_PROVIDER=local (free offline semantic embeddings, no quota)

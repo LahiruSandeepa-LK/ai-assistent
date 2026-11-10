@@ -80,3 +80,48 @@ def test_session_cap_disabled(monkeypatch):
 def test_session_store_singleton_reset():
     reset_session_usage()
     assert isinstance(get_session_usage(), SessionUsageStore)
+
+
+# ---- transient-error retry (Gemini 503 etc.) -------------------------------------------------
+class _Flaky(BaseProvider):
+    name = "flaky"
+
+    def __init__(self, fails, exc):
+        self.calls = 0
+        self.fails = fails
+        self.exc = exc
+
+    def complete(self, system, user, *, model="strong"):
+        self.calls += 1
+        if self.calls <= self.fails:
+            raise self.exc
+        return Completion("recovered", 1, 1)
+
+
+def test_is_retryable_classifier():
+    from llm.gateway import _is_retryable
+    assert _is_retryable(RuntimeError("503 UNAVAILABLE. high demand"))          # Gemini overload
+    assert _is_retryable(RuntimeError("429 rate limit exceeded, try again"))    # transient 429
+    assert not _is_retryable(RuntimeError("429 - You have no credits remaining"))  # billing
+    assert not _is_retryable(RuntimeError("401 invalid api key"))
+    assert not _is_retryable(RuntimeError("400 bad request"))
+
+
+def test_retries_transient_then_succeeds(monkeypatch):
+    monkeypatch.setenv("LLM_CALL_TIMEOUT", "5")
+    monkeypatch.setenv("LLM_RETRY_MAX", "3")
+    monkeypatch.setenv("LLM_RETRY_BASE", "0.01")
+    p = _Flaky(2, RuntimeError("503 UNAVAILABLE high demand"))   # fails twice, then succeeds
+    gw = ModelGateway(provider=p, fallback=None)
+    c = gw.complete("s", "u")
+    assert c.text == "recovered" and p.calls == 3 and not c.timed_out
+
+
+def test_non_retryable_skips_to_fallback(monkeypatch):
+    monkeypatch.setenv("LLM_CALL_TIMEOUT", "5")
+    monkeypatch.setenv("LLM_RETRY_MAX", "3")
+    monkeypatch.setenv("LLM_RETRY_BASE", "0.01")
+    p = _Flaky(99, RuntimeError("429 - You have no credits remaining"))   # hard failure
+    gw = ModelGateway(provider=p, fallback=_Fast())
+    c = gw.complete("s", "u")
+    assert c.text == "fast-answer" and p.calls == 1   # failed fast, no wasted retries

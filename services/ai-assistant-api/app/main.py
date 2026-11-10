@@ -84,11 +84,24 @@ async def _startup_ingest():
     # In offline (no-Pinecone) mode the index is in-process, so the API (which runs the
     # orchestrator in-process) ingests the corpus on startup. With Pinecone set, this is a no-op
     # you can skip (data is already shared). Controlled by SAMPLE_DOCS + INGEST_ON_START.
+    # NEVER let ingestion failure take the API down — it must still start and serve (chat can
+    # degrade to an empty index) rather than refusing every connection. Runs in a background task
+    # so a slow real-embedding ingest doesn't block the port from accepting connections.
     path = os.getenv("SAMPLE_DOCS", "")
-    if os.getenv("INGEST_ON_START", "false").lower() in ("1", "true", "yes") and path and os.path.isdir(path):
-        from rag.ingest import ingest_folder
-        stats = ingest_folder(path)
-        log(logger, "startup_ingest", documents=len(stats), chunks=sum(stats.values()))
+    if os.getenv("INGEST_ON_START", "false").lower() not in ("1", "true", "yes") or not (path and os.path.isdir(path)):
+        return
+
+    import asyncio
+
+    async def _run():
+        try:
+            from rag.ingest import ingest_folder
+            stats = await asyncio.to_thread(ingest_folder, path)
+            log(logger, "startup_ingest", documents=len(stats), chunks=sum(stats.values()))
+        except Exception as e:
+            log(logger, "startup_ingest_failed", error=str(e), error_type=type(e).__name__)
+
+    asyncio.create_task(_run())
 
 
 @app.get("/api/health")
